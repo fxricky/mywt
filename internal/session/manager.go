@@ -82,6 +82,35 @@ type AddOptions struct {
 	Base string
 }
 
+// deriveBranchName returns the branch name for a new project. If branch is
+// non-empty it is returned as-is; otherwise a prefix + session-timestamp is
+// built. It is pure and does not touch git.
+func deriveBranchName(sessionID, branch, branchPrefix string) string {
+	b := strings.TrimSpace(branch)
+	if b != "" {
+		return b
+	}
+	prefix := strings.TrimSpace(branchPrefix)
+	if prefix == "" {
+		prefix = "wt"
+	}
+	ts := strings.TrimPrefix(sessionID, IDPrefix)
+	if prefix == "" {
+		return ts
+	}
+	return prefix + "-" + ts
+}
+
+// validateSubfolder checks that a subfolder name is non-empty and does not
+// contain path separators. It is pure and does not touch git.
+func validateSubfolder(name string) error {
+	n := strings.TrimSpace(name)
+	if n == "" || strings.ContainsAny(n, `/\`) {
+		return fmt.Errorf("invalid subfolder name %q", n)
+	}
+	return nil
+}
+
 // Add creates a worktree of the repo enclosing cwd and registers it as a
 // project in the given session. It must be run from inside a git repo.
 func (m *Manager) Add(s *Session, opts AddOptions) (*Session, error) {
@@ -94,26 +123,14 @@ func (m *Manager) Add(s *Session, opts AddOptions) (*Session, error) {
 	if subfolder == "" {
 		subfolder = filepath.Base(repo)
 	}
-	if subfolder == "" || strings.ContainsAny(subfolder, `/\`) {
-		return nil, fmt.Errorf("invalid subfolder name %q", subfolder)
+	if err := validateSubfolder(subfolder); err != nil {
+		return nil, err
 	}
 	if _, exists := s.FindProject(subfolder); exists {
 		return nil, fmt.Errorf("project %q already exists in session %s (use --as to rename)", subfolder, s.ID)
 	}
 
-	branch := strings.TrimSpace(opts.Branch)
-	if branch == "" {
-		prefix := strings.TrimSpace(opts.BranchPrefix)
-		if prefix == "" {
-			prefix = "wt"
-		}
-		ts := strings.TrimPrefix(s.ID, IDPrefix)
-		if prefix == "" {
-			branch = ts
-		} else {
-			branch = prefix + "-" + ts
-		}
-	}
+	branch := deriveBranchName(s.ID, opts.Branch, opts.BranchPrefix)
 
 	base := strings.TrimSpace(opts.Base)
 	if base == "" {

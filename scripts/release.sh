@@ -40,7 +40,7 @@ gh release create "${TAG}" \
   dist/mywt_darwin_arm64 \
   dist/mywt_darwin_amd64 \
   dist/mywt_checksums.txt \
-  --title "mywt ${TAG}" \
+  --title "${TAG}" \
   --generate-notes
 
 echo "==> Done."
