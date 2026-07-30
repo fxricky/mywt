@@ -9,14 +9,22 @@ worktrees across each repo's own folder.
 
 ## Install (macOS)
 
-### Homebrew (recommended)
+### curl (recommended)
 
 ```sh
-brew install fxricky/tap/mywt
+curl -fsSL https://raw.githubusercontent.com/fxricky/mywt/main/scripts/install.sh | bash
 ```
 
-This builds from source; Homebrew installs Go temporarily, so you don't need Go
-pre-installed.
+Downloads the latest prebuilt macOS binary (Apple Silicon or Intel), verifies its
+checksum, and installs it to `/usr/local/bin` (or `~/.local/bin` if that isn't
+writable). No Go required.
+
+Install a specific version or directory:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/fxricky/mywt/main/scripts/install.sh | bash -s -- v0.1.0
+curl -fsSL https://raw.githubusercontent.com/fxricky/mywt/main/scripts/install.sh | bash -s -- --to ~/bin
+```
 
 ### go install
 

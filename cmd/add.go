@@ -38,10 +38,10 @@ Examples:
 			os.Exit(1)
 		}
 		s, err = m.Add(s, session.AddOptions{
-			Subfolder:     addAs,
-			Branch:        addBranch,
-			BranchPrefix:  addBranchPrefix,
-			Base:          addBase,
+			Subfolder:    addAs,
+			Branch:       addBranch,
+			BranchPrefix: addBranchPrefix,
+			Base:         addBase,
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
