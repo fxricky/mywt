@@ -223,6 +223,53 @@ func (m *Manager) Resolve(idOrName string) (*Session, error) {
 	}
 }
 
+// FindByPath returns the session and project containing path. A project matches
+// its worktree directory and any directory nested below it. If multiple
+// metadata entries match, the most specific (longest) project path wins.
+func (m *Manager) FindByPath(path string) (*Session, Project, bool, error) {
+	absPath, err := canonicalPath(path)
+	if err != nil {
+		return nil, Project{}, false, fmt.Errorf("resolve current path: %w", err)
+	}
+
+	sessions, err := m.List()
+	if err != nil {
+		return nil, Project{}, false, err
+	}
+	var foundSession *Session
+	var foundProject Project
+	bestPathLen := -1
+	for _, s := range sessions {
+		for _, p := range s.Projects {
+			projectPath, err := canonicalPath(p.Path)
+			if err != nil {
+				continue
+			}
+			rel, err := filepath.Rel(projectPath, absPath)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				continue
+			}
+			if len(projectPath) > bestPathLen {
+				foundSession = s
+				foundProject = p
+				bestPathLen = len(projectPath)
+			}
+		}
+	}
+	if foundSession == nil {
+		return nil, Project{}, false, nil
+	}
+	return foundSession, foundProject, true, nil
+}
+
+func canonicalPath(path string) (string, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(filepath.Clean(absPath))
+}
+
 // RemoveOptions controls Remove.
 type RemoveOptions struct {
 	Force          bool
