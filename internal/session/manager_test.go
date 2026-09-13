@@ -1,7 +1,10 @@
 package session
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestDeriveBranchName(t *testing.T) {
@@ -141,6 +144,75 @@ func TestManagerResolve(t *testing.T) {
 	_, err = m.Resolve("nonexistent")
 	if err == nil {
 		t.Fatal("Resolve(nonexistent) should error")
+	}
+}
+
+func TestManagerFindByPath(t *testing.T) {
+	root := t.TempDir()
+	m := New(root)
+	s := &Session{
+		ID:        "worktree-20260730123456",
+		CreatedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+		Root:      root,
+		Projects: []Project{
+			{Subfolder: "backend", Branch: "feature/backend", Path: filepath.Join(root, "worktree-20260730123456", "backend")},
+			{Subfolder: "frontend", Branch: "feature/frontend", Path: filepath.Join(root, "worktree-20260730123456", "frontend")},
+		},
+	}
+	if err := s.save(); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+	for _, p := range s.Projects {
+		if err := os.MkdirAll(filepath.Join(p.Path, "src", "api"), 0o755); err != nil {
+			t.Fatalf("create project path: %v", err)
+		}
+	}
+	if err := os.MkdirAll(s.Projects[0].Path+"-copy", 0o755); err != nil {
+		t.Fatalf("create similar-prefix path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "elsewhere"), 0o755); err != nil {
+		t.Fatalf("create outside path: %v", err)
+	}
+	symlink := filepath.Join(root, "backend-link")
+	if err := os.Symlink(s.Projects[0].Path, symlink); err != nil {
+		t.Fatalf("create project symlink: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		path        string
+		wantProject string
+		wantFound   bool
+	}{
+		{name: "project root", path: s.Projects[0].Path, wantProject: "backend", wantFound: true},
+		{name: "nested directory", path: filepath.Join(s.Projects[0].Path, "src", "api"), wantProject: "backend", wantFound: true},
+		{name: "symlinked project", path: filepath.Join(symlink, "src", "api"), wantProject: "backend", wantFound: true},
+		{name: "similar prefix is not a match", path: s.Projects[0].Path + "-copy", wantFound: false},
+		{name: "session root is not a project", path: s.Dir(), wantFound: false},
+		{name: "outside session", path: filepath.Join(root, "elsewhere"), wantFound: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotSession, gotProject, gotFound, err := m.FindByPath(tc.path)
+			if err != nil {
+				t.Fatalf("FindByPath: %v", err)
+			}
+			if gotFound != tc.wantFound {
+				t.Fatalf("FindByPath found = %v, want %v", gotFound, tc.wantFound)
+			}
+			if !tc.wantFound {
+				if gotSession != nil {
+					t.Fatalf("FindByPath session = %+v, want nil", gotSession)
+				}
+				return
+			}
+			if gotSession.ID != s.ID {
+				t.Errorf("FindByPath session ID = %q, want %q", gotSession.ID, s.ID)
+			}
+			if gotProject.Subfolder != tc.wantProject {
+				t.Errorf("FindByPath project = %q, want %q", gotProject.Subfolder, tc.wantProject)
+			}
+		})
 	}
 }
 

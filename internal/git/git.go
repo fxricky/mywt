@@ -41,6 +41,28 @@ func DefaultBranch(repo string) (string, error) {
 	return "", fmt.Errorf("could not determine default branch for %s", repo)
 }
 
+// CurrentBranch returns the branch currently checked out in a worktree. Git
+// returns HEAD when the worktree is detached.
+func CurrentBranch(worktree string) (string, error) {
+	// symbolic-ref also works for an unborn branch in a newly initialized
+	// repository, where rev-parse HEAD has no commit to resolve yet.
+	if out, err := run(worktree, "symbolic-ref", "--short", "HEAD"); err == nil {
+		if branch := strings.TrimSpace(out); branch != "" {
+			return branch, nil
+		}
+	}
+
+	out, err := run(worktree, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("read current branch: %w", err)
+	}
+	branch := strings.TrimSpace(out)
+	if branch == "" {
+		return "", fmt.Errorf("read current branch: empty branch name")
+	}
+	return branch, nil
+}
+
 // branchExists reports whether a local branch exists in repo.
 func branchExists(repo, branch string) (bool, error) {
 	_, err := run(repo, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)

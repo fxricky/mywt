@@ -54,6 +54,7 @@ mywt create --name feat-x                       # -> worktree-20260730123456
 cd ~/repos/backend  && mywt add worktree-20260730123456   # subfolder = backend (repo basename)
 cd ~/repos/frontend && mywt add worktree-20260730123456 --as fe --base develop
 cd $(mywt open worktree-20260730123456 fe)               # jump into a project
+mywt here                                                # see this session and its project branches
 mywt list                                                # see all sessions
 mywt remove worktree-20260730123456 --delete-branches    # clean up
 ```
@@ -67,6 +68,7 @@ mywt remove worktree-20260730123456 --delete-branches    # clean up
 | `mywt list [--json]` | List all sessions and their projects. |
 | `mywt remove <session> [--force] [--delete-branches]` | Remove a session and all its project worktrees. Branches are kept unless `--delete-branches` is set. |
 | `mywt open <session> [project] [--editor <app>] [--shell]` | Print the path of a session or project (default), open it in an editor, or spawn a shell inside it. |
+| `mywt here` | Show the session containing the current directory, including every project and its branch. |
 | `mywt prune [--dry-run]` | Clean up stale worktrees and broken session folders. |
 | `mywt config show` | Print the worktree root (`~/.mywt`). |
 | `mywt version` | Print the version. |
