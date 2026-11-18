@@ -31,6 +31,6 @@ var createCmd = &cobra.Command{
 }
 
 func init() {
-	createCmd.Flags().StringVar(&createName, "name", "", "optional friendly name for the session")
+	createCmd.Flags().StringVar(&createName, "name", "", "session name; also the default git branch for repos added later (must be a valid branch name)")
 	rootCmd.AddCommand(createCmd)
 }
