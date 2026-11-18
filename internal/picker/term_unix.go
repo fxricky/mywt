@@ -57,14 +57,19 @@ func Run(in, out *os.File, items []Item) (int, error) {
 
 	_, _ = io.WriteString(out, "\033[?1049h\033[?25l")
 
-	width := 80
-	if w, _, err := term.GetSize(int(out.Fd())); err == nil && w > 0 {
-		width = w
+	width, height := 80, 24
+	if w, h, err := term.GetSize(int(out.Fd())); err == nil {
+		if w > 0 {
+			width = w
+		}
+		if h > 0 {
+			height = h
+		}
 	}
 
 	keys := &stream{r: in, fd: fd}
 	return selectIndex(keys.ReadKey, len(items), func(selected int) error {
-		return writeFrame(out, items, selected, width)
+		return writeFrame(out, items, selected, width, height)
 	})
 }
 
@@ -84,21 +89,42 @@ func (s *stream) ReadKey() (Key, error) {
 	if b != 0x1b {
 		return DecodeKey([]byte{b}), nil
 	}
-	if len(s.buf) == 0 {
-		ok, err := s.fillEscape()
-		if !ok {
+	// Arrow keys often arrive split across reads (ESC, then "[B"). Hold an
+	// incomplete CSI/SS3 sequence and wait briefly for its final byte.
+	for {
+		if len(s.buf) == 0 {
+			ok, err := s.readMore()
+			if !ok {
+				if err != nil && !errors.Is(err, io.EOF) {
+					return KeyNone, err
+				}
+				return KeyCancel, nil
+			}
+		}
+		seq, rest, complete := splitEscape(s.buf)
+		if !complete {
+			if len(s.buf) >= maxEscapeBody {
+				s.buf = nil
+				return KeyNone, nil
+			}
+			ok, err := s.readMore()
 			if err != nil && !errors.Is(err, io.EOF) {
 				return KeyNone, err
 			}
-			return KeyCancel, nil
+			if !ok {
+				// The rest never arrived. Drop the fragment so the next
+				// byte is a new key, not the tail of this sequence.
+				s.buf = nil
+				return KeyNone, nil
+			}
+			continue
 		}
+		s.buf = rest
+		if len(seq) == 0 {
+			return KeyNone, nil
+		}
+		return DecodeKey(append([]byte{0x1b}, seq...)), nil
 	}
-	seq, rest := splitEscape(s.buf)
-	s.buf = rest
-	if len(seq) == 0 {
-		return KeyNone, nil
-	}
-	return DecodeKey(append([]byte{0x1b}, seq...)), nil
 }
 
 func (s *stream) take() (byte, error) {
@@ -119,31 +145,42 @@ func (s *stream) take() (byte, error) {
 	return b, nil
 }
 
-func (s *stream) fillEscape() (bool, error) {
-	if len(s.buf) > 0 {
-		return true, nil
-	}
-	if s.fd >= 0 {
-		pfd := []unix.PollFd{{Fd: int32(s.fd), Events: unix.POLLIN}}
-		n, err := unix.Poll(pfd, 40)
-		if err != nil {
-			if errors.Is(err, syscall.EINTR) {
-				return s.fillEscape()
+const (
+	// escapeWaitMS bounds how long an incomplete escape sequence waits for
+	// its final byte. A bare Esc uses the same wait so it is not confused
+	// with an arrow key.
+	escapeWaitMS = 40
+	// maxEscapeBody is the longest CSI/SS3 body we will assemble before
+	// giving up. Arrow sequences are only a few bytes.
+	maxEscapeBody = 32
+)
+
+// readMore waits up to escapeWaitMS for more input when fd is pollable,
+// then appends one read to the buffer. fd < 0 blocks in Read instead.
+func (s *stream) readMore() (bool, error) {
+	for {
+		if s.fd >= 0 {
+			pfd := []unix.PollFd{{Fd: int32(s.fd), Events: unix.POLLIN}}
+			n, err := unix.Poll(pfd, escapeWaitMS)
+			if err != nil {
+				if errors.Is(err, syscall.EINTR) {
+					continue
+				}
+				return false, err
 			}
+			if n == 0 {
+				return false, nil
+			}
+		}
+		tmp := make([]byte, 32)
+		n, err := s.r.Read(tmp)
+		if n > 0 {
+			s.buf = append(s.buf, tmp[:n]...)
+			return true, nil
+		}
+		if err != nil {
 			return false, err
 		}
-		if n == 0 {
-			return false, nil
-		}
+		return false, io.EOF
 	}
-	tmp := make([]byte, 32)
-	n, err := s.r.Read(tmp)
-	if n > 0 {
-		s.buf = append(s.buf, tmp[:n]...)
-		return true, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return false, io.EOF
 }

@@ -2,6 +2,7 @@ package picker
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -38,7 +39,7 @@ func TestFormatMenu(t *testing.T) {
 		{Label: "auth-refactor", Detail: "3 repositories"},
 		{Label: "payment-hotfix", Detail: "2 repositories"},
 	}
-	got := FormatMenu(items, 1, 0)
+	got := FormatMenu(items, 1, 0, 0)
 	if !strings.Contains(got, "Select a session") {
 		t.Fatalf("missing header:\n%s", got)
 	}
@@ -81,17 +82,51 @@ func TestDecodeKey(t *testing.T) {
 }
 
 func TestSplitEscapeLeavesFollowingKey(t *testing.T) {
-	seq, rest := splitEscape([]byte("[B\r"))
-	if string(seq) != "[B" || string(rest) != "\r" {
-		t.Fatalf("split = %q %q", seq, rest)
+	seq, rest, complete := splitEscape([]byte("[B\r"))
+	if !complete || string(seq) != "[B" || string(rest) != "\r" {
+		t.Fatalf("split = %q %q complete=%v", seq, rest, complete)
 	}
-	seq, rest = splitEscape([]byte("OA"))
-	if string(seq) != "OA" || len(rest) != 0 {
-		t.Fatalf("ss3 = %q %q", seq, rest)
+	seq, rest, complete = splitEscape([]byte("OA"))
+	if !complete || string(seq) != "OA" || len(rest) != 0 {
+		t.Fatalf("ss3 = %q %q complete=%v", seq, rest, complete)
 	}
-	seq, rest = splitEscape([]byte("[1;5Axxx"))
-	if string(seq) != "[1;5A" || string(rest) != "xxx" {
-		t.Fatalf("csi = %q %q", seq, rest)
+	seq, rest, complete = splitEscape([]byte("[1;5Axxx"))
+	if !complete || string(seq) != "[1;5A" || string(rest) != "xxx" {
+		t.Fatalf("csi = %q %q complete=%v", seq, rest, complete)
+	}
+	seq, rest, complete = splitEscape([]byte("["))
+	if complete || seq != nil || string(rest) != "[" {
+		t.Fatalf("incomplete CSI = %q %q complete=%v", seq, rest, complete)
+	}
+	seq, rest, complete = splitEscape([]byte("O"))
+	if complete || seq != nil || string(rest) != "O" {
+		t.Fatalf("incomplete SS3 = %q %q complete=%v", seq, rest, complete)
+	}
+}
+
+func TestFormatMenuStaysInsideTerminal(t *testing.T) {
+	items := make([]Item, 30)
+	for i := range items {
+		items[i] = Item{Label: fmt.Sprintf("session-%02d", i), Detail: "1 repository"}
+	}
+
+	top := FormatMenu(items, 0, 80, 24)
+	if !strings.Contains(top, "> session-00") {
+		t.Fatalf("selected row scrolled off:\n%s", top)
+	}
+	if strings.Contains(top, "session-29") || strings.Contains(top, "session-21") {
+		t.Fatalf("window included rows below the terminal:\n%s", top)
+	}
+	if lines := strings.Count(top, "\n"); lines > 24 {
+		t.Fatalf("menu is %d lines", lines)
+	}
+
+	bottom := FormatMenu(items, 29, 80, 24)
+	if !strings.Contains(bottom, "> session-29") {
+		t.Fatalf("last row not visible:\n%s", bottom)
+	}
+	if strings.Contains(bottom, "session-08") {
+		t.Fatalf("window included rows above the terminal:\n%s", bottom)
 	}
 }
 
@@ -186,7 +221,7 @@ func ints(v []int) []string {
 func TestWriteFrameUsesCRLF(t *testing.T) {
 	var buf bytes.Buffer
 	items := []Item{{Label: "auth-refactor", Detail: "1 repository"}}
-	if err := writeFrame(&buf, items, 0, 80); err != nil {
+	if err := writeFrame(&buf, items, 0, 80, 0); err != nil {
 		t.Fatal(err)
 	}
 	got := buf.String()

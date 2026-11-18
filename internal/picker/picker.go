@@ -66,28 +66,91 @@ func repoDetail(n int) string {
 	return fmt.Sprintf("%d repositories", n)
 }
 
+// menuHeaderLines is the title, the key hint, and the blank line under them.
+const menuHeaderLines = 3
+
 // FormatMenu renders the selector as plain text. width <= 0 disables trimming.
-// The selected row starts with "> ".
-func FormatMenu(items []Item, selected, width int) string {
+// height <= 0 shows every row. A positive height keeps the rendered menu,
+// including its header, inside that many terminal rows and keeps the selected
+// row inside the window. The selected row starts with "> ".
+func FormatMenu(items []Item, selected, width, height int) string {
+	lines := menuLines(items, selected, width, height)
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func menuLines(items []Item, selected, width, height int) []string {
+	start, end, header := menuWindow(len(items), selected, height)
+	lines := make([]string, 0, menuHeaderLines+end-start)
+	if header {
+		lines = append(lines,
+			"Select a session",
+			"Enter opens the session root    ↑/↓ move    Esc or Ctrl+C cancels",
+			"",
+		)
+	}
 	maxLabel := 0
 	for _, it := range items {
 		if l := len(it.Label); l > maxLabel {
 			maxLabel = l
 		}
 	}
-	var b strings.Builder
-	b.WriteString("Select a session\n")
-	b.WriteString("Enter opens the session root    ↑/↓ move    Esc or Ctrl+C cancels\n\n")
-	for i, it := range items {
+	for i := start; i < end; i++ {
+		it := items[i]
 		marker := "  "
 		if i == selected {
 			marker = "> "
 		}
 		line := fmt.Sprintf("%s%-*s  %s", marker, maxLabel, it.Label, it.Detail)
-		b.WriteString(trimWidth(line, width))
-		b.WriteByte('\n')
+		lines = append(lines, trimWidth(line, width))
 	}
-	return b.String()
+	return lines
+}
+
+// menuWindow is the half-open item range to draw. header is false only when
+// the terminal is too short for the title and a row together; the selected
+// row is still included.
+func menuWindow(n, selected, height int) (start, end int, header bool) {
+	if n <= 0 {
+		return 0, 0, true
+	}
+	if selected < 0 {
+		selected = 0
+	}
+	if selected >= n {
+		selected = n - 1
+	}
+	if height <= 0 {
+		return 0, n, true
+	}
+	header = true
+	visible := height - menuHeaderLines
+	if visible < 1 {
+		header = false
+		visible = height
+		if visible < 1 {
+			visible = 1
+		}
+	}
+	if visible > n {
+		visible = n
+	}
+	start = selected - (visible-1)/2
+	if start < 0 {
+		start = 0
+	}
+	if start+visible > n {
+		start = n - visible
+	}
+	if selected < start {
+		start = selected
+	}
+	if selected >= start+visible {
+		start = selected - visible + 1
+	}
+	return start, start + visible, header
 }
 
 func trimWidth(s string, width int) string {
@@ -132,42 +195,51 @@ func DecodeKey(seq []byte) Key {
 
 // splitEscape splits one escape body (without the leading ESC) from any
 // following bytes. A CSI sequence runs through its final byte (0x40-0x7E);
-// an SS3 sequence (ESC O x) is two bytes. Anything else is left in rest so
-// the ESC can be handled on its own.
-func splitEscape(buf []byte) (seq, rest []byte) {
+// an SS3 sequence (ESC O x) is two bytes. complete is false when buf is only
+// a prefix of one of those sequences, so the caller can wait for the rest
+// instead of treating the fragment as a finished key. Anything else is left
+// in rest so the ESC can be handled on its own.
+func splitEscape(buf []byte) (seq, rest []byte, complete bool) {
 	if len(buf) == 0 {
-		return nil, nil
+		return nil, nil, false
 	}
 	switch buf[0] {
 	case '[':
 		for i := 1; i < len(buf); i++ {
 			if buf[i] >= 0x40 && buf[i] <= 0x7e {
-				return buf[:i+1], buf[i+1:]
+				return buf[:i+1], buf[i+1:], true
+			}
+			// Parameter bytes are 0x30-0x3F and intermediate bytes are
+			// 0x20-0x2F. Anything else is not this CSI sequence.
+			if buf[i] < 0x20 || buf[i] > 0x3f {
+				return nil, buf, true
 			}
 		}
-		return buf, nil
+		return nil, buf, false
 	case 'O':
 		if len(buf) >= 2 {
-			return buf[:2], buf[2:]
+			return buf[:2], buf[2:], true
 		}
-		return buf, nil
+		return nil, buf, false
 	default:
-		return nil, buf
+		return nil, buf, true
 	}
 }
 
-func writeFrame(out io.Writer, items []Item, selected, width int) error {
-	text := FormatMenu(items, selected, width)
-	text = strings.ReplaceAll(text, "\n", "\r\n")
-	lines := strings.Split(strings.TrimSuffix(text, "\r\n"), "\r\n")
+func writeFrame(out io.Writer, items []Item, selected, width, height int) error {
+	lines := menuLines(items, selected, width, height)
 	var b strings.Builder
 	b.WriteString("\033[H\033[2J")
-	for _, line := range lines {
+	for i, line := range lines {
 		if strings.HasPrefix(line, "> ") {
 			line = "\033[7m" + line + "\033[0m"
 		}
 		b.WriteString(line)
-		b.WriteString("\r\n")
+		// A newline on the last row scrolls the alternate screen and pushes
+		// the selected row out of view. Stay inside the reported height.
+		if height <= 0 || i+1 < height {
+			b.WriteString("\r\n")
+		}
 	}
 	_, err := io.WriteString(out, b.String())
 	return err

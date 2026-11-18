@@ -26,6 +26,71 @@ func TestStreamCombinedArrowAndEnter(t *testing.T) {
 	}
 }
 
+func TestStreamSplitArrowThenEnter(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		if _, err := w.Write([]byte{0x1b, '['}); err != nil {
+			errCh <- err
+			return
+		}
+		time.Sleep(15 * time.Millisecond)
+		_, err := w.Write([]byte{'B', '\r'})
+		errCh <- err
+	}()
+
+	s := &stream{r: r, fd: int(r.Fd())}
+	k, err := s.ReadKey()
+	if err != nil || k != KeyDown {
+		t.Fatalf("first key = %v, %v", k, err)
+	}
+	k, err = s.ReadKey()
+	if err != nil || k != KeyEnter {
+		t.Fatalf("second key = %v, %v", k, err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunKeepsSelectionOnScreen(t *testing.T) {
+	master, slave := openPTY(t)
+	items := make([]Item, 30)
+	for i := range items {
+		items[i] = Item{Label: fmt.Sprintf("session-%02d", i), Detail: "1 repository"}
+	}
+	done := make(chan struct{})
+	go func() {
+		_, _ = Run(slave, slave, items)
+		close(done)
+	}()
+
+	buf, err := readUntil(master, "> session-00", 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf, "Select a session") {
+		t.Fatalf("missing header: %q", buf)
+	}
+	if strings.Contains(buf, "session-29") {
+		t.Fatalf("last session was drawn outside the terminal:\n%s", buf)
+	}
+	if _, err := master.Write([]byte{3}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("selector did not return")
+	}
+}
+
 func TestStreamBareEscCancels(t *testing.T) {
 	s := &stream{r: bytes.NewReader([]byte{0x1b}), fd: -1}
 	k, err := s.ReadKey()
@@ -117,15 +182,20 @@ func openPTY(t *testing.T) (master, slave *os.File) {
 }
 
 func waitFor(master *os.File, needle string, d time.Duration) error {
+	_, err := readUntil(master, needle, d)
+	return err
+}
+
+func readUntil(master *os.File, needle string, d time.Duration) (string, error) {
 	var buf bytes.Buffer
 	deadline := time.Now().Add(d)
 	tmp := make([]byte, 256)
 	for {
 		if strings.Contains(buf.String(), needle) {
-			return nil
+			return buf.String(), nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timed out waiting for %q; got %q", needle, buf.String())
+			return buf.String(), fmt.Errorf("timed out waiting for %q; got %q", needle, buf.String())
 		}
 		_ = master.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 		n, err := master.Read(tmp)
@@ -141,6 +211,6 @@ func waitFor(master *os.File, needle string, d time.Duration) error {
 		if ne, ok := err.(interface{ Timeout() bool }); ok && ne.Timeout() {
 			continue
 		}
-		return err
+		return buf.String(), err
 	}
 }
