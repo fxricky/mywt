@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -79,6 +81,97 @@ func TestCtrlCInterruptsForegroundCommand(t *testing.T) {
 	if !bytes.Contains(buf, []byte("STILL_HERE")) {
 		t.Fatalf("Ctrl+C did not return to the shell\n%s", buf)
 	}
+}
+
+// TestExitReturnsWhenNotSessionLeader runs Launch the way a user shell does:
+// mywt is a foreground job, not the session leader. Restoring the terminal
+// after the child exits must return, so the caller can prompt again.
+func TestExitReturnsWhenNotSessionLeader(t *testing.T) {
+	switch {
+	case os.Getenv("MYWT_EXIT_CHILD") == "1":
+		err := Launch(Options{
+			Shell:     "/bin/sh",
+			Dir:       os.Getenv("MYWT_EXIT_DIR"),
+			Label:     "auth-refactor",
+			SessionID: "worktree-test",
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "launch: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	case os.Getenv("MYWT_EXIT_LEADER") == "1":
+		runExitLeader()
+	}
+
+	dir := t.TempDir()
+	master, slave := openPTY(t)
+	cmd := exec.Command(os.Args[0], "-test.run=^TestExitReturnsWhenNotSessionLeader$", "-test.v")
+	cmd.Env = append(os.Environ(), "MYWT_EXIT_LEADER=1", "MYWT_EXIT_DIR="+dir)
+	cmd.Stdin = slave
+	cmd.Stdout = slave
+	cmd.Stderr = slave
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setsid:  true,
+		Setctty: true,
+		Ctty:    0,
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	_ = slave.Close()
+
+	_ = waitPty(t, master, "[mywt: auth-refactor]", 4*time.Second)
+	if _, err := master.Write([]byte("exit\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("session leader: %v", err)
+		}
+	case <-time.After(4 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatal("shell exit did not return the terminal to the calling shell")
+	}
+}
+
+func runExitLeader() {
+	dir := os.Getenv("MYWT_EXIT_DIR")
+	env := make([]string, 0, len(os.Environ())+2)
+	for _, e := range os.Environ() {
+		if strings.HasPrefix(e, "MYWT_EXIT_") {
+			continue
+		}
+		env = append(env, e)
+	}
+	env = append(env, "MYWT_EXIT_CHILD=1", "MYWT_EXIT_DIR="+dir)
+	cmd := exec.Command(os.Args[0], "-test.run=^TestExitReturnsWhenNotSessionLeader$", "-test.v")
+	cmd.Env = env
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "start job: %v\n", err)
+		os.Exit(1)
+	}
+	fd := int(os.Stdin.Fd())
+	if err := unix.IoctlSetPointerInt(fd, unix.TIOCSPGRP, cmd.Process.Pid); err != nil {
+		fmt.Fprintf(os.Stderr, "foreground: %v\n", err)
+		os.Exit(1)
+	}
+	err := cmd.Wait()
+	signal.Ignore(syscall.SIGTTOU)
+	_ = unix.IoctlSetPointerInt(fd, unix.TIOCSPGRP, os.Getpid())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "job: %v\n", err)
+		os.Exit(1)
+	}
+	os.Exit(0)
 }
 
 func openPTY(t *testing.T) (master, slave *os.File) {

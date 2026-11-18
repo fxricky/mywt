@@ -69,6 +69,14 @@ func runInteractive(cmd *exec.Cmd, tty *os.File) error {
 	}
 	if useForeground {
 		defer func() {
+			// The child shell was the foreground process group. This process
+			// is only a job of the user's shell, so it is in the background
+			// once the child exits. TIOCSPGRP from a background job raises
+			// SIGTTOU. With that signal caught, the ioctl fails with EINTR
+			// and a retry never finishes, which leaves the user's shell
+			// without the terminal. POSIX tcsetpgrp allows the call when
+			// SIGTTOU is ignored.
+			signal.Ignore(syscall.SIGTTOU)
 			_ = unix.IoctlSetPointerInt(fd, unix.TIOCSPGRP, parentPgid)
 		}()
 	}

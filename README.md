@@ -10,7 +10,11 @@ it keep their own branches and history.
 
 Running `mywt` with no arguments in a terminal opens a session selector and
 then an interactive shell at that session root. No shell rc changes and no
-tmux install are required. This tree's version is 0.3.0.
+tmux install are required.
+
+![Entering a mywt session](docs/demo.gif)
+
+Recorded from the built `mywt` binary (`mywt` → picker → Enter → session-root banner → `pwd` / `ls` → `exit` back to the original directory). Regenerate with [`docs/record-demo.sh`](docs/record-demo.sh), which needs [agg](https://github.com/asciinema/agg) on `PATH`.
 
 ## Install (macOS)
 
@@ -27,7 +31,7 @@ writable). No Go required.
 Install a specific version or directory:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/fxricky/mywt/main/scripts/install.sh | bash -s -- v0.3.0
+curl -fsSL https://raw.githubusercontent.com/fxricky/mywt/main/scripts/install.sh | bash -s -- v0.1.0
 curl -fsSL https://raw.githubusercontent.com/fxricky/mywt/main/scripts/install.sh | bash -s -- --to ~/bin
 ```
 
