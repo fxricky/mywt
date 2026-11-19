@@ -91,19 +91,22 @@ func menuLines(items []Item, selected, width, height int) []string {
 			"",
 		)
 	}
+	labels := make([]string, len(items))
+	details := make([]string, len(items))
 	maxLabel := 0
-	for _, it := range items {
-		if l := len(it.Label); l > maxLabel {
+	for i, it := range items {
+		labels[i] = sanitizeDisplay(it.Label)
+		details[i] = sanitizeDisplay(it.Detail)
+		if l := len(labels[i]); l > maxLabel {
 			maxLabel = l
 		}
 	}
 	for i := start; i < end; i++ {
-		it := items[i]
 		marker := "  "
 		if i == selected {
 			marker = "> "
 		}
-		line := fmt.Sprintf("%s%-*s  %s", marker, maxLabel, it.Label, it.Detail)
+		line := fmt.Sprintf("%s%-*s  %s", marker, maxLabel, labels[i], details[i])
 		lines = append(lines, trimWidth(line, width))
 	}
 	return lines
@@ -153,14 +156,29 @@ func menuWindow(n, selected, height int) (start, end int, header bool) {
 	return start, start + visible, header
 }
 
+// sanitizeDisplay replaces C0 and C1 controls and DEL with a space so a
+// session name cannot inject an escape, newline, or tab into the menu.
+func sanitizeDisplay(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return ' '
+		}
+		return r
+	}, s)
+}
+
 func trimWidth(s string, width int) string {
-	if width <= 0 || len(s) <= width {
+	if width <= 0 {
+		return s
+	}
+	rs := []rune(s)
+	if len(rs) <= width {
 		return s
 	}
 	if width < 4 {
-		return s[:width]
+		return string(rs[:width])
 	}
-	return s[:width-3] + "..."
+	return string(rs[:width-3]) + "..."
 }
 
 // DecodeKey maps one key or escape sequence to a selector action.

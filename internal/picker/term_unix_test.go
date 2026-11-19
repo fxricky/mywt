@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -88,6 +89,81 @@ func TestRunKeepsSelectionOnScreen(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("selector did not return")
+	}
+}
+
+func TestStreamArrowSplitBy50ms(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		if _, err := w.Write([]byte{0x1b}); err != nil {
+			errCh <- err
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+		if _, err := w.Write([]byte{'['}); err != nil {
+			errCh <- err
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+		_, err := w.Write([]byte{'B'})
+		errCh <- err
+	}()
+
+	s := &stream{r: r, fd: int(r.Fd())}
+	k, err := s.ReadKey()
+	if err != nil || k != KeyDown {
+		t.Fatalf("key = %v, %v", k, err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStreamLateArrowAfterCancelIsConsumed(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		if _, err := w.Write([]byte{0x1b}); err != nil {
+			errCh <- err
+			return
+		}
+		// Past the first wait, still inside the post-cancel drain.
+		time.Sleep(160 * time.Millisecond)
+		_, err := w.Write([]byte{'[', 'B'})
+		errCh <- err
+		_ = w.Close()
+	}()
+
+	s := &stream{r: r, fd: int(r.Fd())}
+	k, err := s.ReadKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rest, readErr := io.ReadAll(r)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(rest) != 0 {
+		t.Fatalf("late %q left unread after key %v", rest, k)
+	}
+	if k != KeyCancel && k != KeyDown {
+		t.Fatalf("key = %v", k)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/fxricky/mywt/internal/session"
 )
@@ -216,6 +217,66 @@ func ints(v []int) []string {
 		out[i] = string(rune('0' + n))
 	}
 	return out
+}
+
+func TestFormatMenuStripsControlBytes(t *testing.T) {
+	label := "evil" + "\x1b]99;PWNED\x07\r\n\tX" + "\u007f\u009b"
+	got := FormatMenu([]Item{{Label: label, Detail: "detail\x1b"}}, 0, 0, 0)
+	if !utf8.ValidString(got) {
+		t.Fatalf("menu is not valid UTF-8: %q", got)
+	}
+	var row string
+	for _, line := range strings.Split(got, "\n") {
+		for i := 0; i < len(line); i++ {
+			if line[i] < 0x20 || line[i] == 0x7f {
+				t.Fatalf("control byte %#x in %q\nmenu: %q", line[i], line, got)
+			}
+		}
+		for _, r := range line {
+			if r >= 0x80 && r <= 0x9f {
+				t.Fatalf("C1 control %#U in %q", r, line)
+			}
+		}
+		if strings.Contains(line, "evil") {
+			row = line
+		}
+	}
+	if row == "" || !strings.Contains(row, "]99;PWNED") || !strings.Contains(row, "X") {
+		t.Fatalf("sanitized row = %q\nmenu: %q", row, got)
+	}
+	if strings.Contains(got, "\x1b") || strings.Contains(got, "\x07") {
+		t.Fatalf("escape payload leaked: %q", got)
+	}
+}
+
+func TestTrimWidthKeepsCJKRunes(t *testing.T) {
+	name := strings.Repeat("测", 40)
+	items := []Item{{Label: name, Detail: "1 repository"}}
+	for _, width := range []int{1, 2, 3, 4, 5, 8, 10, 39, 40, 41, 80} {
+		got := FormatMenu(items, 0, width, 24)
+		if !utf8.ValidString(got) || splitHan(got) {
+			t.Fatalf("menu width %d split a rune: %q", width, got)
+		}
+		trimmed := trimWidth(name, width)
+		if !utf8.ValidString(trimmed) || splitHan(trimmed) {
+			t.Fatalf("trimWidth %d split a rune: %q", width, trimmed)
+		}
+	}
+}
+
+// splitHan reports a truncated UTF-8 sequence for 测 (e6 b5 8b).
+func splitHan(s string) bool {
+	b := []byte(s)
+	for i := 0; i < len(b); i++ {
+		if b[i] != 0xe6 {
+			continue
+		}
+		if i+2 >= len(b) || b[i+1] != 0xb5 || b[i+2] != 0x8b {
+			return true
+		}
+		i += 2
+	}
+	return false
 }
 
 func TestWriteFrameUsesCRLF(t *testing.T) {

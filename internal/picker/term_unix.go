@@ -98,6 +98,9 @@ func (s *stream) ReadKey() (Key, error) {
 				if err != nil && !errors.Is(err, io.EOF) {
 					return KeyNone, err
 				}
+				// Esc won the wait. If the rest of an arrow shows up late,
+				// read it now so cooked mode does not echo it after cancel.
+				s.discardEscapeTail()
 				return KeyCancel, nil
 			}
 		}
@@ -148,8 +151,8 @@ func (s *stream) take() (byte, error) {
 const (
 	// escapeWaitMS bounds how long an incomplete escape sequence waits for
 	// its final byte. A bare Esc uses the same wait so it is not confused
-	// with an arrow key.
-	escapeWaitMS = 40
+	// with an arrow key. 100ms covers an ESC, "[", "B" split about 50ms apart.
+	escapeWaitMS = 100
 	// maxEscapeBody is the longest CSI/SS3 body we will assemble before
 	// giving up. Arrow sequences are only a few bytes.
 	maxEscapeBody = 32
@@ -182,5 +185,34 @@ func (s *stream) readMore() (bool, error) {
 			return false, err
 		}
 		return false, io.EOF
+	}
+}
+
+// discardEscapeTail runs after a bare Esc has been classified as cancel.
+// A late CSI/SS3 tail is still sitting in the kernel input queue; reading it
+// while the terminal is raw drops it instead of leaving it for the shell to
+// echo. A tty cannot be peeked, so bytes read during this extra wait are
+// discarded even when they are not an escape tail. The wait is one more
+// escapeWaitMS, and then at most one further wait if the tail is incomplete.
+func (s *stream) discardEscapeTail() {
+	if s.fd < 0 {
+		return
+	}
+	ok, err := s.readMore()
+	if !ok || err != nil {
+		s.buf = nil
+		return
+	}
+	for {
+		_, _, complete := splitEscape(s.buf)
+		if complete || len(s.buf) >= maxEscapeBody {
+			s.buf = nil
+			return
+		}
+		ok, err = s.readMore()
+		if !ok || err != nil {
+			s.buf = nil
+			return
+		}
 	}
 }
