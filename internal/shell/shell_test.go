@@ -138,11 +138,14 @@ func TestLaunchUsesSessionRootAndInteractiveArgs(t *testing.T) {
 			t.Errorf("stdout missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "\033]0;") {
-		t.Errorf("title sequence leaked into a non-terminal stdout:\n%s", out)
+	if strings.Contains(out, "\033]0;") || strings.Contains(stderr.String(), "\033") {
+		t.Errorf("title or styling leaked into a non-terminal:\nstdout:\n%s\nstderr:\n%s", out, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "[mywt: auth-refactor]") {
-		t.Fatalf("banner missing:\n%s", stderr.String())
+	if strings.Contains(stderr.String(), "╭") || strings.Contains(stderr.String(), "[mywt:") {
+		t.Fatalf("non-TTY stderr drew a box or the legacy banner:\n%s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "mywt: auth-refactor") || !strings.Contains(stderr.String(), "(exit 0)") {
+		t.Fatalf("plain banner missing:\n%s", stderr.String())
 	}
 }
 

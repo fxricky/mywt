@@ -22,6 +22,8 @@ export PATH="$demo/bin:$PATH"
 # A short prompt and no first-login sudo hint keep the recording on mywt.
 printf "PS1='\$ '\nunset PROMPT_COMMAND\n" >"$demo/home/.bashrc"
 touch "$demo/home/.hushlogin"
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
 export DEMO_HOME="$demo/home"
 export DEMO_PROJECTS="$demo/home/projects"
 export CAST_PATH="$root/docs/demo.cast"

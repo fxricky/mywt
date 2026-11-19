@@ -94,18 +94,39 @@ directory is the **session root**, so `ls` shows every repository added to the
 session. `mywt` does not `cd` your current shell, does not edit `.zshrc` /
 `.bashrc` / fish config, and does not use tmux.
 
-On startup the shell prints a banner:
+On a terminal, startup draws a frame and exit prints a footer. The frame names
+the session, the session root, and the directory `exit` returns to. The width
+follows the terminal, between 40 and 80 columns. A UTF-8 locale uses box
+drawing; any other locale uses ASCII. `NO_COLOR` turns off styling.
+
+```text
+╭─ mywt: auth-refactor ──────────────────────────────╮
+│ ~/.mywt/worktree-20260730123456                    │
+│ Type exit to return to ~/projects                  │
+╰────────────────────────────────────────────────────╯
+```
+
+```text
+╰─ left mywt: auth-refactor (exit 0) · back in ~/projects
+```
+
+The window title is saved, set to `mywt: auth-refactor`, and restored when the
+shell exits. The frame and title are not a pinned header; a header that stays
+on screen while other programs run is follow-up work. The child shell is
+ephemeral: exit (or the shell exiting) returns you to the original shell and
+directory, and restores the terminal mode. Ctrl+C inside the session
+interrupts the foreground command, the same way it does in a normal shell.
+
+`--no-frame`, or `MYWT_NO_FRAME=1`, prints the plain banner instead:
 
 ```text
 [mywt: auth-refactor]  ~/.mywt/worktree-20260730123456
 ```
 
-When the terminal accepts it, the window title is also set to
-`mywt: auth-refactor`. The banner and title are not a pinned header; a header
-that stays on screen while other programs run is follow-up work. The child
-shell is ephemeral: exit (or the shell exiting) returns you to the original
-shell and directory, and restores the terminal mode. Ctrl+C inside the session
-interrupts the foreground command, the same way it does in a normal shell.
+Starting `mywt` from inside a session prints a warning and marks the frame
+`(nested in <session>)`. The shell still starts. When stderr is not a
+terminal, the same facts are printed as plain text, with no box and no title
+sequences.
 
 `claude` and `codex`, if installed, can be started from the session root
 without `cd`-ing into a child repository. They can see the child folders

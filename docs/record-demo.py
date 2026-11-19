@@ -163,7 +163,7 @@ def main():
         rec.pause(1.6)
         rec.enter()
 
-        rec.wait_for("[mywt: auth-refactor]", 5)
+        rec.wait_for("mywt: auth-refactor", 5)
         rec.pause(1.0)
         rec.type_text("pwd")
         rec.enter()
@@ -178,6 +178,8 @@ def main():
         prompts = rec.raw.count(b"$ ")
         rec.type_text("exit")
         rec.enter()
+        rec.wait_for("left mywt: auth-refactor", 5)
+        rec.wait_for("(exit 0)", 2)
         # A new prompt means the session shell returned the terminal.
         rec.wait_count("$ ", prompts + 1, 5)
         rec.pause(0.4)
@@ -194,10 +196,11 @@ def main():
             projects,
             "Select a session",
             "> auth-refactor",
-            "[mywt: auth-refactor]",
+            "mywt: auth-refactor",
             ".mywt/worktree-",
             "backend",
             "frontend",
+            "left mywt: auth-refactor",
         ]
         cursor = 0
         raw = bytes(rec.raw)

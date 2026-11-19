@@ -52,6 +52,7 @@ func runInteractiveSelector() {
 		Dir:       s.Dir(),
 		Label:     label,
 		SessionID: s.ID,
+		NoFrame:   noFrame,
 	})
 	var exitErr *shell.ExitError
 	if errors.As(err, &exitErr) {

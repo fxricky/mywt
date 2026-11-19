@@ -50,6 +50,8 @@ func TestRootHelpDocumentsSelector(t *testing.T) {
 		"auth-refactor",
 		"wt-<timestamp>",
 		"No shell rc changes",
+		"--no-frame",
+		"does not change your prompt",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("root help missing %q\n%s", want, text)

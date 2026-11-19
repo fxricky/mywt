@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -35,16 +36,23 @@ type Options struct {
 	Stderr    io.Writer
 	// Env replaces the child environment when non-nil. Nil inherits os.Environ().
 	Env []string
+	// NoFrame keeps the plain startup banner. MYWT_NO_FRAME=1 does the same.
+	NoFrame bool
 }
 
 // Launch starts an interactive child shell whose working directory is the
 // session root. The parent process's working directory is not changed.
 //
-// A startup banner names the session. When stdout or stderr is a terminal, the
-// window title is set to "mywt: <session>" as well. That title is not a pinned
-// header; mywt does not stay in front of the shell to redraw one, and it does
-// not allocate a PTY or run tmux. The child is a normal interactive shell, so
-// programs such as vim, less, claude, and codex take the terminal as usual.
+// On a terminal, stderr gets a box frame and, after the shell exits, a footer
+// with the real exit status. The window title is saved and restored. A pipe
+// gets a plain banner and the footer, with no box and no title sequences.
+// NoFrame, or MYWT_NO_FRAME=1, keeps the original banner and does not print a
+// footer. The shell prompt is never modified.
+//
+// The title is not a pinned header; mywt does not stay in front of the shell
+// to redraw one, and it does not allocate a PTY or run tmux. The child is a
+// normal interactive shell, so programs such as vim, less, claude, and codex
+// take the terminal as usual.
 func Launch(opts Options) error {
 	shellPath, err := ResolveShell(opts.Shell)
 	if err != nil {
@@ -75,19 +83,76 @@ func Launch(opts Options) error {
 		stderr = os.Stderr
 	}
 
-	writeTitle(label, stdout, stderr)
-	if _, err := io.WriteString(stderr, FormatBanner(label, displayPath(dir))); err != nil {
-		return fmt.Errorf("write session banner: %w", err)
+	env := opts.Env
+	parent, parentSet := lookupEnv(env, "MYWT_SESSION")
+	nested := parentSet && parent != ""
+	if nested {
+		if _, err := io.WriteString(stderr, NestedWarning(parent)); err != nil {
+			return fmt.Errorf("write nested warning: %w", err)
+		}
+	}
+	noFrame := opts.NoFrame || envEquals(env, "MYWT_NO_FRAME", "1")
+	unicode := utf8Locale(env)
+	frame := Frame{
+		Label:    label,
+		Root:     sanitizeTerminal(displayPath(dir)),
+		ReturnTo: sanitizeTerminal(displayPath(workingDir())),
+		Nested:   sanitizeTerminal(parent),
+	}
+	if !nested {
+		frame.Nested = ""
 	}
 
-	cmd, err := shellCommand(shellPath, dir, sessionEnv(opts.Env, label, dir, opts.SessionID))
+	tty := isTerminalWriter(stderr)
+	width := ClampWidth(80)
+	restoreTitle := func() {}
+	switch {
+	case noFrame:
+		writeTitle(label, stdout, stderr)
+		if _, err := io.WriteString(stderr, FormatBanner(label, frame.Root)); err != nil {
+			return fmt.Errorf("write session banner: %w", err)
+		}
+	case !tty:
+		if _, err := io.WriteString(stderr, RenderPlain(frame)); err != nil {
+			return fmt.Errorf("write session banner: %w", err)
+		}
+	default:
+		width = terminalColumns(stderr)
+		if _, err := io.WriteString(stderr, TitleSaveAndSet(label)); err != nil {
+			return fmt.Errorf("write session title: %w", err)
+		}
+		restored := false
+		restoreTitle = func() {
+			if restored {
+				return
+			}
+			restored = true
+			_, _ = io.WriteString(stderr, TitleRestore())
+		}
+		defer restoreTitle()
+		box := RenderBox(frame, Style{Unicode: unicode, Color: colorEnabled(env), Width: width})
+		if _, err := io.WriteString(stderr, box); err != nil {
+			return fmt.Errorf("write session banner: %w", err)
+		}
+	}
+
+	cmd, err := shellCommand(shellPath, dir, sessionEnv(env, label, dir, opts.SessionID))
 	if err != nil {
 		return err
 	}
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	return runInteractive(cmd, stdinFile(stdin))
+	err = runInteractive(cmd, stdinFile(stdin))
+	if !noFrame {
+		restoreTitle()
+		if code, ran := exitStatus(err); ran {
+			if _, werr := io.WriteString(stderr, RenderFooter(frame, code, unicode, width)); werr != nil && err == nil {
+				return fmt.Errorf("write session footer: %w", werr)
+			}
+		}
+	}
+	return err
 }
 
 // ResolveShell picks an executable shell. explicit wins when it is usable;
@@ -236,4 +301,75 @@ func sessionEnv(base []string, label, root, id string) []string {
 func stdinFile(r io.Reader) *os.File {
 	f, _ := r.(*os.File)
 	return f
+}
+
+func workingDir() string {
+	dir, err := os.Getwd()
+	if err != nil || dir == "" {
+		return "."
+	}
+	return dir
+}
+
+func isTerminalWriter(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && term.IsTerminal(int(f.Fd()))
+}
+
+func terminalColumns(w io.Writer) int {
+	f, ok := w.(*os.File)
+	if !ok || !term.IsTerminal(int(f.Fd())) {
+		return ClampWidth(80)
+	}
+	cols, _, err := term.GetSize(int(f.Fd()))
+	if err != nil || cols <= 0 {
+		return ClampWidth(80)
+	}
+	return ClampWidth(cols)
+}
+
+func exitStatus(err error) (code int, ran bool) {
+	if err == nil {
+		return 0, true
+	}
+	var exitErr *ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.Code, true
+	}
+	return 0, false
+}
+
+func lookupEnv(env []string, key string) (string, bool) {
+	if env == nil {
+		return os.LookupEnv(key)
+	}
+	for i := len(env) - 1; i >= 0; i-- {
+		k, v, ok := strings.Cut(env[i], "=")
+		if ok && k == key {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+func envEquals(env []string, key, want string) bool {
+	v, ok := lookupEnv(env, key)
+	return ok && v == want
+}
+
+func utf8Locale(env []string) bool {
+	for _, key := range []string{"LC_ALL", "LC_CTYPE", "LANG"} {
+		v, ok := lookupEnv(env, key)
+		if !ok || v == "" {
+			continue
+		}
+		u := strings.ToUpper(v)
+		return strings.Contains(u, "UTF-8") || strings.Contains(u, "UTF8")
+	}
+	return false
+}
+
+func colorEnabled(env []string) bool {
+	_, set := lookupEnv(env, "NO_COLOR")
+	return !set
 }

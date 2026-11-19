@@ -53,7 +53,7 @@ func TestCtrlCInterruptsForegroundCommand(t *testing.T) {
 	}
 	_ = slave.Close()
 
-	buf := waitPty(t, master, "[mywt: auth-refactor]", 4*time.Second)
+	buf := waitPty(t, master, "mywt: auth-refactor", 4*time.Second)
 	if _, err := master.Write([]byte("sleep 30\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestExitReturnsWhenNotSessionLeader(t *testing.T) {
 	}
 	_ = slave.Close()
 
-	_ = waitPty(t, master, "[mywt: auth-refactor]", 4*time.Second)
+	_ = waitPty(t, master, "mywt: auth-refactor", 4*time.Second)
 	if _, err := master.Write([]byte("exit\n")); err != nil {
 		t.Fatal(err)
 	}

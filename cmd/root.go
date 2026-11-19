@@ -10,6 +10,8 @@ import (
 	"github.com/fxricky/mywt/internal/session"
 )
 
+var noFrame bool
+
 var rootCmd = &cobra.Command{
 	Use:   "mywt",
 	Short: "Manage git worktree sessions and open them in a shell",
@@ -22,8 +24,12 @@ repository worktree, not one of those worktrees. The session root is not itself
 a git repository. exit returns to the shell and directory you started from.
 No shell rc changes and no tmux are required.
 
-A startup banner names the active session. When the terminal supports it, the
-window title is set to "mywt: <session>" as well. That is not a pinned header.
+On a terminal the shell is wrapped in a frame naming the session, the session
+root, and the directory exit returns to. A footer then reports the shell's
+exit status. --no-frame, or MYWT_NO_FRAME=1, prints the plain banner instead.
+mywt does not change your prompt. When the terminal supports it, the window
+title is set to "mywt: <session>" and restored on exit. That is not a pinned
+header.
 
 Each session is stored under ~/.mywt/worktree-<YYYYMMDDHHmmss>/. A named
 session's repositories default to a git branch of that same name. Unnamed
@@ -43,6 +49,10 @@ Typical workflow:
 	Run: func(cmd *cobra.Command, args []string) {
 		runInteractiveSelector()
 	},
+}
+
+func init() {
+	rootCmd.Flags().BoolVar(&noFrame, "no-frame", false, "print the plain session banner instead of the subshell frame")
 }
 
 // Execute runs the root command.
