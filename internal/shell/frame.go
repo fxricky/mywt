@@ -74,17 +74,33 @@ func RenderBox(f Frame, s Style) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-// RenderFooter is the line printed after the subshell exits.
+// RenderFooter is the line printed after the subshell exits on a terminal.
 // Unicode: ╰─ left mywt: <name> (exit N) · back in <cwd>
 // ASCII:   +-- left mywt: <name> (exit N) - back in <cwd>
 func RenderFooter(f Frame, exitCode int, unicode bool, width int) string {
-	head := "╰─"
+	return renderFooter(f, exitCode, unicode, width, true)
+}
+
+// RenderPlainFooter is the same line with no box corner, for a non-terminal.
+// Unicode: left mywt: <name> (exit N) · back in <cwd>
+// ASCII:   left mywt: <name> (exit N) - back in <cwd>
+func RenderPlainFooter(f Frame, exitCode int, unicode bool, width int) string {
+	return renderFooter(f, exitCode, unicode, width, false)
+}
+
+func renderFooter(f Frame, exitCode int, unicode bool, width int, corner bool) string {
+	head := ""
 	sep := "·"
 	if !unicode {
-		head = "+--"
 		sep = "-"
 	}
-	prefix := head + " left mywt: "
+	if corner {
+		head = "╰─ "
+		if !unicode {
+			head = "+-- "
+		}
+	}
+	prefix := head + "left mywt: "
 	middle := fmt.Sprintf(" (exit %d) %s back in ", exitCode, sep)
 	line := prefix + f.Label + middle + f.ReturnTo
 	if width > 0 && utf8.RuneCountInString(line) > width {

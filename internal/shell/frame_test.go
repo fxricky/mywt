@@ -174,12 +174,13 @@ func TestLaunchPlainBannerWhenStderrIsNotATTY(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := stderr.String()
-	for _, want := range []string{"mywt: auth-refactor", "Type exit to return to", "(exit 0)", "╰─ left mywt: auth-refactor"} {
+	plainFooter := "left mywt: auth-refactor (exit 0) · back in " + displayPath(workingDir()) + "\n"
+	for _, want := range []string{"mywt: auth-refactor", "Type exit to return to", plainFooter} {
 		if !strings.Contains(got, want) {
 			t.Errorf("stderr missing %q\n%s", want, got)
 		}
 	}
-	for _, bad := range []string{"╭", "\033", "[mywt:"} {
+	for _, bad := range []string{"╭", "╰", "\033", "[mywt:"} {
 		if strings.Contains(got, bad) {
 			t.Fatalf("non-TTY stderr contains %q\n%s", bad, got)
 		}

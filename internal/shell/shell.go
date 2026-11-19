@@ -147,7 +147,11 @@ func Launch(opts Options) error {
 	if !noFrame {
 		restoreTitle()
 		if code, ran := exitStatus(err); ran {
-			if _, werr := io.WriteString(stderr, RenderFooter(frame, code, unicode, width)); werr != nil && err == nil {
+			footer := RenderFooter(frame, code, unicode, width)
+			if !tty {
+				footer = RenderPlainFooter(frame, code, unicode, width)
+			}
+			if _, werr := io.WriteString(stderr, footer); werr != nil && err == nil {
 				return fmt.Errorf("write session footer: %w", werr)
 			}
 		}
