@@ -127,6 +127,78 @@ func TestNestedWarning(t *testing.T) {
 	}
 }
 
+func TestFrameFooterAndTitleDropC1(t *testing.T) {
+	// c1 + U+009B + U+0085 + end, with CJK, ESC, CR, LF, and DEL beside the controls.
+	name := "c1\u009b\u0085end测\x1b\r\n测\x7f"
+	f := Frame{
+		Label:    name,
+		Root:     "root\u009b测",
+		ReturnTo: "cwd\u0085测",
+		Nested:   "parent\u009b测",
+	}
+	box := RenderBox(f, Style{Unicode: true, Color: false, Width: 80})
+	footer := RenderFooter(f, 3, true, 80)
+	plain := RenderPlainFooter(f, 3, false, 80)
+	title := TitleSaveAndSet(name)
+	payload, ok := oscPayload(title)
+	if !ok {
+		t.Fatalf("title has no OSC payload: %q", title)
+	}
+	for _, part := range []struct {
+		name string
+		text string
+	}{
+		{"frame", box},
+		{"footer", footer},
+		{"plain footer", plain},
+		{"title payload", payload},
+	} {
+		for _, line := range strings.Split(part.text, "\n") {
+			if r, bad := controlRune(line); bad {
+				t.Fatalf("%s contains %#U: %q", part.name, r, line)
+			}
+		}
+		if !strings.Contains(part.text, "测") {
+			t.Fatalf("%s dropped CJK: %q", part.name, part.text)
+		}
+	}
+	if !strings.Contains(box, "c1") || !strings.Contains(box, "end") || !strings.Contains(box, "parent") {
+		t.Fatalf("frame lost label text: %q", box)
+	}
+	if !strings.Contains(payload, "mywt: c1") || !strings.Contains(payload, "end") {
+		t.Fatalf("title payload = %q", payload)
+	}
+	if strings.Count(box, "\n") != 4 || strings.Count(footer, "\n") != 1 {
+		t.Fatalf("a control split a row\nframe: %q\nfooter: %q", box, footer)
+	}
+	if !strings.Contains(title, "\033[22;0t") || !strings.HasSuffix(title, "\a") {
+		t.Fatalf("title wrapper changed: %q", title)
+	}
+}
+
+func oscPayload(title string) (string, bool) {
+	const marker = "\033]0;"
+	i := strings.Index(title, marker)
+	if i < 0 {
+		return "", false
+	}
+	rest := title[i+len(marker):]
+	j := strings.IndexByte(rest, 0x07)
+	if j < 0 {
+		return "", false
+	}
+	return rest[:j], true
+}
+
+func controlRune(s string) (rune, bool) {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return r, true
+		}
+	}
+	return 0, false
+}
+
 func TestTitleSequences(t *testing.T) {
 	on := TitleSaveAndSet("auth-refactor")
 	if on != "\033[22;0t\033]0;mywt: auth-refactor\a" {

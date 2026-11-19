@@ -115,8 +115,9 @@ func (s *stream) ReadKey() (Key, error) {
 				return KeyNone, err
 			}
 			if !ok {
-				// The rest never arrived. Drop the fragment so the next
-				// byte is a new key, not the tail of this sequence.
+				// The rest never arrived. Drain a trailing final byte, such
+				// as "B" after "[", so it is not echoed once we leave.
+				s.discardEscapeTail()
 				s.buf = nil
 				return KeyNone, nil
 			}
@@ -188,29 +189,34 @@ func (s *stream) readMore() (bool, error) {
 	}
 }
 
-// discardEscapeTail runs after a bare Esc has been classified as cancel.
-// A late CSI/SS3 tail is still sitting in the kernel input queue; reading it
-// while the terminal is raw drops it instead of leaving it for the shell to
-// echo. A tty cannot be peeked, so bytes read during this extra wait are
-// discarded even when they are not an escape tail. The wait is one more
-// escapeWaitMS, and then at most one further wait if the tail is incomplete.
+// discardEscapeTail reads a CSI/SS3 tail that arrives after Esc has already
+// been classified, or after an incomplete tail has timed out. The bytes are
+// read while the terminal is still raw, so the parent shell does not echo
+// them. A tty cannot be peeked, so anything read here is discarded. An
+// incomplete tail (ESC, then "[" about 120ms later) gets one extra wait for
+// a trailing final byte such as "B".
 func (s *stream) discardEscapeTail() {
 	if s.fd < 0 {
 		return
 	}
-	ok, err := s.readMore()
-	if !ok || err != nil {
-		s.buf = nil
-		return
-	}
+	misses := 0
 	for {
-		_, _, complete := splitEscape(s.buf)
-		if complete || len(s.buf) >= maxEscapeBody {
+		ok, err := s.readMore()
+		if err != nil {
 			s.buf = nil
 			return
 		}
-		ok, err = s.readMore()
-		if !ok || err != nil {
+		if !ok {
+			misses++
+			if len(s.buf) == 0 || misses > 1 {
+				s.buf = nil
+				return
+			}
+			continue
+		}
+		misses = 0
+		_, _, complete := splitEscape(s.buf)
+		if complete || len(s.buf) >= maxEscapeBody {
 			s.buf = nil
 			return
 		}

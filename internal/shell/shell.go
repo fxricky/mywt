@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/fxricky/mywt/internal/termtext"
 	"golang.org/x/term"
 )
 
@@ -62,9 +63,9 @@ func Launch(opts Options) error {
 	if err != nil {
 		return err
 	}
-	label := sanitizeTerminal(opts.Label)
+	label := termtext.Sanitize(opts.Label)
 	if label == "" {
-		label = sanitizeTerminal(opts.SessionID)
+		label = termtext.Sanitize(opts.SessionID)
 	}
 	if label == "" {
 		label = "session"
@@ -87,6 +88,7 @@ func Launch(opts Options) error {
 	parent, parentSet := lookupEnv(env, "MYWT_SESSION")
 	nested := parentSet && parent != ""
 	if nested {
+		parent = termtext.Sanitize(parent)
 		if _, err := io.WriteString(stderr, NestedWarning(parent)); err != nil {
 			return fmt.Errorf("write nested warning: %w", err)
 		}
@@ -95,9 +97,9 @@ func Launch(opts Options) error {
 	unicode := utf8Locale(env)
 	frame := Frame{
 		Label:    label,
-		Root:     sanitizeTerminal(displayPath(dir)),
-		ReturnTo: sanitizeTerminal(displayPath(workingDir())),
-		Nested:   sanitizeTerminal(parent),
+		Root:     termtext.Sanitize(displayPath(dir)),
+		ReturnTo: termtext.Sanitize(displayPath(workingDir())),
+		Nested:   termtext.Sanitize(parent),
 	}
 	if !nested {
 		frame.Nested = ""
@@ -217,17 +219,8 @@ func displayPath(path string) string {
 	return path
 }
 
-func sanitizeTerminal(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
-			return -1
-		}
-		return r
-	}, s)
-}
-
 func writeTitle(label string, stdout, stderr io.Writer) {
-	title := "\033]0;mywt: " + label + "\a"
+	title := "\033]0;mywt: " + termtext.Sanitize(label) + "\a"
 	for _, w := range []io.Writer{stdout, stderr} {
 		f, ok := w.(*os.File)
 		if ok && term.IsTerminal(int(f.Fd())) {

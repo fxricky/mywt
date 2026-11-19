@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/fxricky/mywt/internal/termtext"
 )
 
 // Frame is the text shown around a picker subshell. Rendering never starts
@@ -51,12 +53,14 @@ func NestedWarning(parent string) string {
 // RenderPlain is the banner used when stderr is not a terminal: the same
 // facts as the box, with no border and no styling.
 func RenderPlain(f Frame) string {
+	f = f.sanitized()
 	return frameTitle(f) + "\n" + f.Root + "\n" + exitInstruction(f.ReturnTo) + "\n\n"
 }
 
 // RenderBox draws the entry frame. Every line has Style.Width columns,
 // ignoring SGR sequences, so the box does not wrap.
 func RenderBox(f Frame, s Style) string {
+	f = f.sanitized()
 	width := s.Width
 	if width < 8 {
 		width = minFrameWidth
@@ -89,6 +93,7 @@ func RenderPlainFooter(f Frame, exitCode int, unicode bool, width int) string {
 }
 
 func renderFooter(f Frame, exitCode int, unicode bool, width int, corner bool) string {
+	f = f.sanitized()
 	head := ""
 	sep := "·"
 	if !unicode {
@@ -129,12 +134,21 @@ func renderFooter(f Frame, exitCode int, unicode bool, width int, corner bool) s
 
 // TitleSaveAndSet saves the window title (CSI 22;0t) and sets mywt's title.
 func TitleSaveAndSet(label string) string {
-	return "\033[22;0t\033]0;mywt: " + label + "\a"
+	return "\033[22;0t\033]0;mywt: " + termtext.Sanitize(label) + "\a"
 }
 
 // TitleRestore restores the window title saved by TitleSaveAndSet (CSI 23;0t).
 func TitleRestore() string {
 	return "\033[23;0t"
+}
+
+func (f Frame) sanitized() Frame {
+	return Frame{
+		Label:    termtext.Sanitize(f.Label),
+		Root:     termtext.Sanitize(f.Root),
+		ReturnTo: termtext.Sanitize(f.ReturnTo),
+		Nested:   termtext.Sanitize(f.Nested),
+	}
 }
 
 func frameTitle(f Frame) string {

@@ -167,6 +167,48 @@ func TestStreamLateArrowAfterCancelIsConsumed(t *testing.T) {
 	}
 }
 
+func TestStreamIncompleteTailFinalByteIsConsumed(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		if _, err := w.Write([]byte{0x1b}); err != nil {
+			errCh <- err
+			return
+		}
+		time.Sleep(120 * time.Millisecond)
+		if _, err := w.Write([]byte{'['}); err != nil {
+			errCh <- err
+			return
+		}
+		time.Sleep(120 * time.Millisecond)
+		_, err := w.Write([]byte{'B'})
+		errCh <- err
+		_ = w.Close()
+	}()
+
+	s := &stream{r: r, fd: int(r.Fd())}
+	k, err := s.ReadKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rest, readErr := io.ReadAll(r)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(rest) != 0 {
+		t.Fatalf("trailing %q left unread after key %v", rest, k)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStreamBareEscCancels(t *testing.T) {
 	s := &stream{r: bytes.NewReader([]byte{0x1b}), fd: -1}
 	k, err := s.ReadKey()

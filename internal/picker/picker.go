@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/fxricky/mywt/internal/session"
+	"github.com/fxricky/mywt/internal/termtext"
 )
 
 // Key is a selector input.
@@ -95,8 +96,8 @@ func menuLines(items []Item, selected, width, height int) []string {
 	details := make([]string, len(items))
 	maxLabel := 0
 	for i, it := range items {
-		labels[i] = sanitizeDisplay(it.Label)
-		details[i] = sanitizeDisplay(it.Detail)
+		labels[i] = termtext.Sanitize(it.Label)
+		details[i] = termtext.Sanitize(it.Detail)
 		if l := len(labels[i]); l > maxLabel {
 			maxLabel = l
 		}
@@ -154,17 +155,6 @@ func menuWindow(n, selected, height int) (start, end int, header bool) {
 		start = selected - visible + 1
 	}
 	return start, start + visible, header
-}
-
-// sanitizeDisplay replaces C0 and C1 controls and DEL with a space so a
-// session name cannot inject an escape, newline, or tab into the menu.
-func sanitizeDisplay(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
-			return ' '
-		}
-		return r
-	}, s)
 }
 
 func trimWidth(s string, width int) string {
