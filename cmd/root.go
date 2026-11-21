@@ -10,21 +10,55 @@ import (
 	"github.com/fxricky/mywt/internal/session"
 )
 
+var noFrame bool
+var noPromptTag bool
+
 var rootCmd = &cobra.Command{
 	Use:   "mywt",
-	Short: "mywt manages git worktrees for many projects in one place",
-	Long: `mywt is a tool for managing git worktrees in a single shared folder.
+	Short: "Manage git worktree sessions and open them in a shell",
+	Long: `mywt manages git worktrees for several repositories in one session folder.
 
-Each session lives at <root>/worktree-<YYYYMMDDHHmmss>/ and can hold one or
-more project worktrees (e.g. backend/ and frontend/) so you can work on several
-repos together under one timestamped directory.
+With no arguments in a terminal, mywt opens a session selector. The session you
+pick starts an interactive shell (from $SHELL when that program exists, otherwise /bin/sh)
+whose working directory is the session root: the folder that contains every
+repository worktree, not one of those worktrees. The session root is not itself
+a git repository. exit returns to the shell and directory you started from.
+It does not edit shell rc files and does not use tmux.
+
+On a terminal the shell is wrapped in a frame naming the session, the session
+root, and the directory exit returns to. A footer then reports the shell's
+exit status. --no-frame, or MYWT_NO_FRAME=1, prints the plain banner instead.
+Picker sessions add "(mywt:<name>) " to the front of your existing prompt.
+mywt does not edit .bashrc, .zshrc, fish config, or any other file: it loads
+your config first and adds the tag on top. --no-prompt-tag, or
+MYWT_NO_PROMPT_TAG=1, leaves the prompt unchanged and does not turn the frame
+off. --no-frame does not turn the tag off. When the terminal supports it, the
+window title is set to "mywt: <session>" and restored on exit. That is not a
+pinned header.
+
+Each session is stored under ~/.mywt/worktree-<YYYYMMDDHHmmss>/. A named
+session's repositories default to a git branch of that same name. Unnamed
+sessions still default to wt-<timestamp>.
 
 Typical workflow:
-  mywt create                       # start an empty session (run from anywhere)
-  cd ~/repos/backend && mywt add worktree-<id>   # add backend worktree
-  cd ~/repos/frontend && mywt add worktree-<id>  # add frontend worktree
-  cd $(mywt open worktree-<id> backend)          # jump into a project
+  mywt create --name auth-refactor
+  cd ~/repos/backend && mywt add auth-refactor
+  cd ~/repos/frontend && mywt add auth-refactor
+  mywt                                 # select auth-refactor; shell starts at the session root
+  mywt open auth-refactor backend      # print one project's path
 `,
+	Example: `  mywt
+  mywt create --name auth-refactor
+  mywt add auth-refactor --branch feature-x`,
+	Args: cobra.NoArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		runInteractiveSelector()
+	},
+}
+
+func init() {
+	rootCmd.Flags().BoolVar(&noFrame, "no-frame", false, "print the plain session banner instead of the subshell frame")
+	rootCmd.Flags().BoolVar(&noPromptTag, "no-prompt-tag", false, "do not add (mywt:<name>) to the front of the shell prompt")
 }
 
 // Execute runs the root command.

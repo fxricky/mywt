@@ -1,0 +1,64 @@
+# Sourced by bash --rcfile. The user's bashrc runs first; the tag is added
+# on top and again at the end of PROMPT_COMMAND. The session name is never
+# written into this file. It is read from $MYWT_PROMPT_TAG.
+# Remember the temp dir before the user's bashrc can change TMPDIR.
+__mywt_tmpdir=${TMPDIR:-/tmp}
+while [ "${__mywt_tmpdir%/}" != "$__mywt_tmpdir" ]; do
+  __mywt_tmpdir=${__mywt_tmpdir%/}
+done
+if [ -r "$HOME/.bashrc" ]; then
+  . "$HOME/.bashrc" || true
+fi
+
+__mywt_prompt_tag() {
+  local status=$?
+  if [ -n "${MYWT_PARENT_PROMPT_TAG-}" ]; then
+    case ${PS1-} in
+      "$MYWT_PARENT_PROMPT_TAG"*) PS1=${PS1#"$MYWT_PARENT_PROMPT_TAG"} ;;
+    esac
+  fi
+  case ${PS1-} in
+    "$MYWT_PROMPT_TAG"*) ;;
+    *) PS1="${MYWT_PROMPT_TAG}${PS1-}" ;;
+  esac
+  return "$status"
+}
+__mywt_prompt_tag
+
+__mywt_pc=$(declare -p PROMPT_COMMAND 2>/dev/null || true)
+case $__mywt_pc in
+  'declare -a'*)
+    PROMPT_COMMAND+=(__mywt_prompt_tag)
+    ;;
+  *)
+    if [ -z "${PROMPT_COMMAND-}" ]; then
+      PROMPT_COMMAND=__mywt_prompt_tag
+    else
+      # A newline stays valid when the existing value already ends in ';',
+      # '&', whitespace, or a newline. A ';' separator turns 'history -a;'
+      # into ';;', which is a syntax error before every prompt.
+      case $PROMPT_COMMAND in
+        *__mywt_prompt_tag*) ;;
+        *) PROMPT_COMMAND="${PROMPT_COMMAND}"$'\n''__mywt_prompt_tag' ;;
+      esac
+    fi
+    ;;
+esac
+unset __mywt_pc
+# The hook is in memory now. Remove the private dir so it does not survive
+# mywt being killed. Only a mywt-prompt-* directory directly in the temp dir
+# recorded above is eligible.
+__mywt_base=${MYWT_SHIM_DIR-}
+__mywt_base=${__mywt_base##*/}
+__mywt_parent=${MYWT_SHIM_DIR-}
+__mywt_parent=${__mywt_parent%/*}
+case $__mywt_base in
+  mywt-prompt-*)
+    case $__mywt_parent in
+      "$__mywt_tmpdir")
+        command rm -rf -- "$MYWT_SHIM_DIR"
+        ;;
+    esac
+    ;;
+esac
+unset MYWT_SHIM_DIR __mywt_base __mywt_parent __mywt_tmpdir
