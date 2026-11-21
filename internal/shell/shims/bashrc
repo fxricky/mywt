@@ -1,6 +1,11 @@
 # Sourced by bash --rcfile. The user's bashrc runs first; the tag is added
 # on top and again at the end of PROMPT_COMMAND. The session name is never
 # written into this file. It is read from $MYWT_PROMPT_TAG.
+# Remember the temp dir before the user's bashrc can change TMPDIR.
+__mywt_tmpdir=${TMPDIR:-/tmp}
+while [ "${__mywt_tmpdir%/}" != "$__mywt_tmpdir" ]; do
+  __mywt_tmpdir=${__mywt_tmpdir%/}
+done
 if [ -r "$HOME/.bashrc" ]; then
   . "$HOME/.bashrc" || true
 fi
@@ -34,3 +39,20 @@ case $__mywt_pc in
     ;;
 esac
 unset __mywt_pc
+# The hook is in memory now. Remove the private dir so it does not survive
+# mywt being killed. Only a mywt-prompt-* directory directly in the temp dir
+# recorded above is eligible.
+__mywt_base=${MYWT_SHIM_DIR-}
+__mywt_base=${__mywt_base##*/}
+__mywt_parent=${MYWT_SHIM_DIR-}
+__mywt_parent=${__mywt_parent%/*}
+case $__mywt_base in
+  mywt-prompt-*)
+    case $__mywt_parent in
+      "$__mywt_tmpdir")
+        command rm -rf -- "$MYWT_SHIM_DIR"
+        ;;
+    esac
+    ;;
+esac
+unset MYWT_SHIM_DIR __mywt_base __mywt_parent __mywt_tmpdir

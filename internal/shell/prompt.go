@@ -91,6 +91,7 @@ func planShell(shellPath, shimDir, tag, inheritedTag string, inherited []string)
 		plan.Tagged = true
 		plan.Args = []string{"--rcfile", filepath.Join(shimDir, "bashrc"), "-i"}
 		plan.Files = map[string]string{"bashrc": mustShim("shims/bashrc")}
+		plan.Env = append(plan.Env, "MYWT_SHIM_DIR="+shimDir)
 	case "zsh":
 		plan.Tagged = true
 		plan.Args = []string{"-i"}
@@ -98,8 +99,9 @@ func planShell(shellPath, shimDir, tag, inheritedTag string, inherited []string)
 			".zshenv": mustShim("shims/zshenv"),
 			".zshrc":  mustShim("shims/zshrc"),
 		}
-		plan.Env = append(plan.Env, "ZDOTDIR="+shimDir, "MYWT_ORIG_ZDOTDIR="+origZdotdir(inherited))
+		plan.Env = append(plan.Env, "ZDOTDIR="+shimDir, "MYWT_ORIG_ZDOTDIR="+origZdotdir(inherited), "MYWT_SHIM_DIR="+shimDir)
 	case "fish":
+		// fish --init-command carries the script itself. No temp directory.
 		plan.Tagged = true
 		plan.Args = []string{"-i", "--init-command", mustShim("shims/fish.fish")}
 	case "sh", "dash", "ash", "ksh", "mksh":
@@ -107,7 +109,7 @@ func planShell(shellPath, shimDir, tag, inheritedTag string, inherited []string)
 		plan.Args = []string{"-i"}
 		plan.Files = map[string]string{"env.sh": mustShim("shims/env.sh")}
 		orig, _ := lookupEnv(inherited, "ENV")
-		plan.Env = append(plan.Env, "ENV="+filepath.Join(shimDir, "env.sh"), "MYWT_ORIG_ENV="+orig)
+		plan.Env = append(plan.Env, "ENV="+filepath.Join(shimDir, "env.sh"), "MYWT_ORIG_ENV="+orig, "MYWT_SHIM_DIR="+shimDir)
 	default:
 		return plan
 	}

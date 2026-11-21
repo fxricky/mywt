@@ -31,3 +31,20 @@ __mywt_prompt_tag() {
 
 __mywt_prompt_tag
 add-zsh-hook precmd __mywt_prompt_tag
+# ZDOTDIR is the user's again, and this file has been read. Remove the
+# private dir. Only a mywt-prompt-* directory directly in the temp dir
+# recorded in .zshenv is eligible.
+__mywt_base=${MYWT_SHIM_DIR-}
+__mywt_base=${__mywt_base##*/}
+__mywt_parent=${MYWT_SHIM_DIR-}
+__mywt_parent=${__mywt_parent%/*}
+case $__mywt_base in
+  mywt-prompt-*)
+    case $__mywt_parent in
+      "$__mywt_tmpdir")
+        command rm -rf -- "$MYWT_SHIM_DIR"
+        ;;
+    esac
+    ;;
+esac
+unset MYWT_SHIM_DIR __mywt_base __mywt_parent __mywt_tmpdir __mywt_shim_dir __mywt_real_zdotdir

@@ -73,7 +73,7 @@ func TestPlanShellFamilies(t *testing.T) {
 	if !bash.Tagged || strings.Join(bash.Args, " ") != "--rcfile "+filepath.Join(dir, "bashrc")+" -i" {
 		t.Fatalf("bash plan = %+v", bash.Args)
 	}
-	if !hasEnv(bash.Env, "MYWT_PROMPT_TAG", tag) || hasKey(bash.Env, "MYWT_PARENT_PROMPT_TAG") {
+	if !hasEnv(bash.Env, "MYWT_PROMPT_TAG", tag) || hasKey(bash.Env, "MYWT_PARENT_PROMPT_TAG") || !hasEnv(bash.Env, "MYWT_SHIM_DIR", dir) {
 		t.Fatalf("bash env = %v", bash.Env)
 	}
 	if _, ok := bash.Files["bashrc"]; !ok || strings.Contains(bash.Files["bashrc"], "auth-refactor") {
@@ -86,7 +86,7 @@ func TestPlanShellFamilies(t *testing.T) {
 	}
 
 	zsh := planShell("/bin/zsh", dir, tag, "", inherited)
-	if strings.Join(zsh.Args, " ") != "-i" || !hasEnv(zsh.Env, "ZDOTDIR", dir) || !hasEnv(zsh.Env, "MYWT_ORIG_ZDOTDIR", "/custom/zsh") {
+	if strings.Join(zsh.Args, " ") != "-i" || !hasEnv(zsh.Env, "ZDOTDIR", dir) || !hasEnv(zsh.Env, "MYWT_ORIG_ZDOTDIR", "/custom/zsh") || !hasEnv(zsh.Env, "MYWT_SHIM_DIR", dir) {
 		t.Fatalf("zsh = args %v env %v", zsh.Args, zsh.Env)
 	}
 	if _, ok := zsh.Files[".zshenv"]; !ok {
@@ -108,13 +108,16 @@ func TestPlanShellFamilies(t *testing.T) {
 	if strings.Contains(fish.Args[2], "auth-refactor") || !strings.Contains(fish.Args[2], "MYWT_PROMPT_TAG") {
 		t.Fatal("fish init command is not a static shim")
 	}
+	if hasKey(fish.Env, "MYWT_SHIM_DIR") || len(fish.Files) != 0 {
+		t.Fatalf("fish should not get a shim directory: env %v files %v", fish.Env, fish.Files)
+	}
 
 	for _, name := range []string{"sh", "dash", "ksh", "mksh", "ash", "/bin/sh"} {
 		p := planShell(name, dir, tag, "", inherited)
 		if !p.Tagged || strings.Join(p.Args, " ") != "-i" {
 			t.Fatalf("%s args = %v", name, p.Args)
 		}
-		if !hasEnv(p.Env, "ENV", filepath.Join(dir, "env.sh")) || !hasEnv(p.Env, "MYWT_ORIG_ENV", "/custom/env") {
+		if !hasEnv(p.Env, "ENV", filepath.Join(dir, "env.sh")) || !hasEnv(p.Env, "MYWT_ORIG_ENV", "/custom/env") || !hasEnv(p.Env, "MYWT_SHIM_DIR", dir) {
 			t.Fatalf("%s env = %v", name, p.Env)
 		}
 		if strings.Contains(p.Files["env.sh"], "auth-refactor") {
@@ -138,7 +141,7 @@ func TestPlanShellFamilies(t *testing.T) {
 func TestPromptTagOptOutAndNestedEnv(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "bash")
-	body := "#!/bin/sh\nprintf 'ARGS:%s\\n' \"$*\"\nprintf 'TAG:%s\\n' \"${MYWT_PROMPT_TAG-}\"\nprintf 'PARENT:%s\\n' \"${MYWT_PARENT_PROMPT_TAG-}\"\n"
+	body := "#!/bin/sh\nprintf 'ARGS:%s\\n' \"$*\"\nprintf 'TAG:%s\\n' \"${MYWT_PROMPT_TAG-}\"\nprintf 'PARENT:%s\\n' \"${MYWT_PARENT_PROMPT_TAG-}\"\nprintf 'SHIM:%s\\n' \"${MYWT_SHIM_DIR-}\"\n"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -160,23 +163,23 @@ func TestPromptTagOptOutAndNestedEnv(t *testing.T) {
 	}
 
 	stdout, stderr := run(t, []string{"MYWT_NO_PROMPT_TAG=0"}, false, false)
-	if !strings.Contains(stdout, "ARGS:--rcfile") || !strings.Contains(stdout, "TAG:(mywt:auth-refactor) ") {
+	if !strings.Contains(stdout, "ARGS:--rcfile") || !strings.Contains(stdout, "TAG:(mywt:auth-refactor) ") || !strings.Contains(stdout, "SHIM:"+os.TempDir()+"/mywt-prompt-") {
 		t.Fatalf("MYWT_NO_PROMPT_TAG=0 did not keep the tag:\n%s", stdout)
 	}
 	if strings.Contains(stderr, "Session root") {
 		t.Fatal("tag-on launch used the legacy banner")
 	}
 
-	stdout, stderr = run(t, []string{"MYWT_NO_PROMPT_TAG=1", "MYWT_PROMPT_TAG=(mywt:old) "}, false, false)
-	if stdout != "ARGS:-i\nTAG:\nPARENT:\n" {
+	stdout, stderr = run(t, []string{"MYWT_NO_PROMPT_TAG=1", "MYWT_PROMPT_TAG=(mywt:old) ", "MYWT_SHIM_DIR=" + filepath.Join(os.TempDir(), "mywt-prompt-stale")}, false, false)
+	if stdout != "ARGS:-i\nTAG:\nPARENT:\nSHIM:\n" {
 		t.Fatalf("MYWT_NO_PROMPT_TAG=1 args/env =\n%s", stdout)
 	}
 	if !strings.Contains(stderr, "Type exit to return to") || strings.Contains(stderr, "Session root") {
 		t.Fatalf("opt-out dropped the frame:\n%s", stderr)
 	}
 
-	stdout, _ = run(t, []string{"MYWT_PROMPT_TAG=(mywt:old) "}, true, false)
-	if stdout != "ARGS:-i\nTAG:\nPARENT:\n" {
+	stdout, _ = run(t, []string{"MYWT_PROMPT_TAG=(mywt:old) ", "MYWT_SHIM_DIR=" + filepath.Join(os.TempDir(), "mywt-prompt-stale")}, true, false)
+	if stdout != "ARGS:-i\nTAG:\nPARENT:\nSHIM:\n" {
 		t.Fatalf("NoPromptTag args/env =\n%s", stdout)
 	}
 

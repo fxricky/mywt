@@ -53,7 +53,9 @@ type Options struct {
 // footer. Unless NoPromptTag or MYWT_NO_PROMPT_TAG=1 is set, a known shell
 // gets "(mywt:<name>) " in front of the prompt it builds from the user's rc
 // files. Those files are only sourced. The shims live in a private temp
-// directory that is removed when Launch returns.
+// directory. Each shim removes that directory after it has been read, and
+// Launch also removes it when it returns, including when the shell fails
+// to start.
 //
 // The title is not a pinned header; mywt does not stay in front of the shell
 // to redraw one, and it does not allocate a PTY or run tmux. The child is a
@@ -143,7 +145,7 @@ func Launch(opts Options) error {
 		}
 	}
 
-	childEnv := dropEnvKeys(sessionEnv(env, label, dir, opts.SessionID), "MYWT_PROMPT_TAG", "MYWT_PARENT_PROMPT_TAG")
+	childEnv := dropEnvKeys(sessionEnv(env, label, dir, opts.SessionID), "MYWT_PROMPT_TAG", "MYWT_PARENT_PROMPT_TAG", "MYWT_SHIM_DIR")
 	args := shellArgs(shellPath)
 	tagOn := !opts.NoPromptTag && !envEquals(env, "MYWT_NO_PROMPT_TAG", "1")
 	if tagOn && promptFamily(shellPath) != "" {

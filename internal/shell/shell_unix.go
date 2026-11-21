@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -64,9 +65,43 @@ func runInteractive(cmd *exec.Cmd, tty *os.File) error {
 		}
 	}
 
+	// SIGHUP is what a closed terminal delivers. Catch it so defers still run,
+	// forward it to the shell, and exit 129. SIGTERM is not caught: interactive
+	// bash and zsh ignore it, so waiting after a forward would hang. SIGINT is
+	// handled above and is not part of this path.
+	stopHangup := make(chan struct{})
+	hangup := make(chan os.Signal, 2)
+	signal.Notify(hangup, syscall.SIGHUP)
+	defer signal.Stop(hangup)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start shell: %w", err)
 	}
+	var (
+		mu     sync.Mutex
+		caught syscall.Signal
+		wg     sync.WaitGroup
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case sig := <-hangup:
+				s, ok := sig.(syscall.Signal)
+				if !ok || cmd.Process == nil {
+					continue
+				}
+				mu.Lock()
+				if caught == 0 {
+					caught = s
+				}
+				mu.Unlock()
+				forwardToChild(cmd, s, useForeground)
+			case <-stopHangup:
+				return
+			}
+		}
+	}()
 	if useForeground {
 		defer func() {
 			// The child shell was the foreground process group. This process
@@ -80,7 +115,31 @@ func runInteractive(cmd *exec.Cmd, tty *os.File) error {
 			_ = unix.IoctlSetPointerInt(fd, unix.TIOCSPGRP, parentPgid)
 		}()
 	}
-	return waitErr(cmd.Wait())
+	err := waitErr(cmd.Wait())
+	close(stopHangup)
+	wg.Wait()
+	mu.Lock()
+	sig := caught
+	mu.Unlock()
+	if sig != 0 {
+		return &ExitError{Code: 128 + int(sig)}
+	}
+	return err
+}
+
+// forwardToChild delivers sig to the shell. When the shell has its own
+// foreground process group, the whole group is signaled so a command the
+// shell is running sees it too.
+func forwardToChild(cmd *exec.Cmd, sig syscall.Signal, group bool) {
+	if cmd.Process == nil {
+		return
+	}
+	if group {
+		if err := syscall.Kill(-cmd.Process.Pid, sig); err == nil {
+			return
+		}
+	}
+	_ = cmd.Process.Signal(sig)
 }
 
 func waitErr(err error) error {

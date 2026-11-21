@@ -131,7 +131,8 @@ sequences.
 Picker sessions add `(mywt:<name>) ` to the front of your existing prompt.
 mywt does not edit `.bashrc`, `.zshrc`, fish config, or any other file. It
 loads your config first and adds the tag on top. The shim files live in a
-private temp directory and are removed when the shell exits.
+private temp directory and remove that directory once they have been read,
+so nothing is left behind if mywt is killed. fish needs no files.
 
 - bash is started with `--rcfile`. That file sources `~/.bashrc`, then prefixes
   `PS1` and appends the same step to `PROMPT_COMMAND` so a framework that
@@ -159,6 +160,8 @@ the prompt becomes `(mywt:<parent>><name>) `, for example
 the tag. A fish prompt that a framework redefines on a later event (tide on a
 variable change, for example) can drop the tag. Powerlevel10k's instant prompt
 can appear briefly before the tag. `mywt open --shell` does not add a tag.
+SIGHUP, including a closed terminal, is forwarded to the shell and mywt then
+exits 129. Interactive bash and zsh ignore SIGTERM, so mywt does not catch it.
 
 `claude` and `codex`, if installed, can be started from the session root
 without `cd`-ing into a child repository. They can see the child folders

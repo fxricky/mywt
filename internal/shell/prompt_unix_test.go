@@ -117,6 +117,7 @@ func TestPromptFishSurvivesClear(t *testing.T) {
 	fish := requireShell(t, "fish")
 	home := t.TempDir()
 	dir := t.TempDir()
+	beforeFish := promptDirNames()
 	writeFile(t, filepath.Join(home, ".config", "fish", "config.fish"), "function fish_prompt\n    printf 'fish> '\nend\n")
 	master, slave := openFramePTY(t, 100)
 	cmd := exec.Command(os.Args[0], "-test.run=^TestPromptFishSurvivesClear$")
@@ -135,6 +136,9 @@ func TestPromptFishSurvivesClear(t *testing.T) {
 	}
 	_ = slave.Close()
 	buf := waitPty(t, master, "(mywt:auth-refactor) fish> ", 8*time.Second)
+	if extra := newPromptDirs(beforeFish); len(extra) != 0 {
+		t.Fatalf("fish created a shim dir: %v", extra)
+	}
 	mustWrite(t, master, "clear\ntrue\nexit\n")
 	buf = append(buf, waitPty(t, master, "true", 5*time.Second)...)
 	done := make(chan error, 1)

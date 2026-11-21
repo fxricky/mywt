@@ -1,5 +1,10 @@
 # ZDOTDIR points at this directory when zsh starts. Remember it, load the
 # user's .zshenv, then point ZDOTDIR back here so zsh reads the shim .zshrc.
+# Remember the temp dir before the user's .zshenv can change TMPDIR.
+__mywt_tmpdir=${TMPDIR:-/tmp}
+while [ "${__mywt_tmpdir%/}" != "$__mywt_tmpdir" ]; do
+  __mywt_tmpdir=${__mywt_tmpdir%/}
+done
 __mywt_shim_dir=$ZDOTDIR
 if [ -n "${MYWT_ORIG_ZDOTDIR-}" ]; then
   ZDOTDIR=$MYWT_ORIG_ZDOTDIR
