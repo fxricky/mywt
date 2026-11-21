@@ -256,17 +256,25 @@ func TestPromptPOSIXEnv(t *testing.T) {
 func TestPromptPOSIXEnvExpansion(t *testing.T) {
 	cases := []struct {
 		name, envVal, wantEnv, wantMarker string
+		// guard is true when the value must not run commands or abort startup.
+		guard bool
 	}{
 		{name: "dollar-home", envVal: "$HOME/.shrc", wantEnv: "$HOME/.shrc", wantMarker: "from-env"},
 		{name: "brace-home", envVal: "${HOME}/.shrc", wantEnv: "${HOME}/.shrc", wantMarker: "from-env"},
 		{name: "absolute", wantMarker: "from-env"},
 		{name: "empty"},
+		{name: "breakout", guard: true},
+		{name: "unbalanced-quote", envVal: `"`, wantEnv: `"`, guard: true},
+		{name: "unbalanced-brace", envVal: `${`, wantEnv: `${`, guard: true},
+		{name: "unbalanced-home", envVal: `${HOME`, wantEnv: `${HOME`, guard: true},
+		{name: "trailing-backslash", envVal: `foo\`, wantEnv: `foo\`, guard: true},
 	}
 	for _, shellName := range []string{"sh", "dash"} {
 		shellPath := requireShell(t, shellName)
 		for _, tc := range cases {
 			t.Run(shellName+"/"+tc.name, func(t *testing.T) {
 				home := t.TempDir()
+				canary := filepath.Join(home, "canary")
 				writeFile(t, filepath.Join(home, ".shrc"), "MYWT_ENV_MARKER=from-env\nexport MYWT_ENV_MARKER\nPS1='$ '\n")
 				var extra []string
 				wantEnv := tc.wantEnv
@@ -276,14 +284,32 @@ func TestPromptPOSIXEnvExpansion(t *testing.T) {
 					writeFile(t, envFile, "MYWT_ENV_MARKER=from-env\nexport MYWT_ENV_MARKER\nPS1='$ '\n")
 					extra = []string{"ENV=" + envFile}
 					wantEnv = envFile
+				case "breakout":
+					wantEnv = `"; touch ` + canary + `; "`
+					extra = []string{"ENV=" + wantEnv}
 				case "empty":
 				default:
 					extra = []string{"ENV=" + tc.envVal}
 				}
+				before := promptDirNames()
 				master, done := startTaggedShell(t, shellPath, home, "auth-refactor", extra, false)
 				buf := waitPty(t, master, "(mywt:auth-refactor)", 8*time.Second)
+				if extraDirs := newPromptDirs(before); len(extraDirs) != 0 {
+					t.Fatalf("shim dir left behind: %v\n%s", extraDirs, buf)
+				}
 				mustWrite(t, master, "printf '%s\\n' \"${MYWT_ENV_MARKER-}\" > \"$HOME/marker-value\"\nprintf '%s\\n' \"${ENV-}\" > \"$HOME/env-value\"\nexit\n")
 				waitLaunch(t, done, buf)
+				buf = append(buf, readPtyRest(t, master)...)
+				if tc.guard {
+					for _, fatal := range []string{"Syntax error", "eval:", "Permission denied"} {
+						if bytes.Contains(buf, []byte(fatal)) {
+							t.Fatalf("startup printed %q:\n%s", fatal, buf)
+						}
+					}
+				}
+				if _, err := os.Stat(canary); err == nil {
+					t.Fatalf("ENV value created %s\n%s", canary, buf)
+				}
 				marker, err := os.ReadFile(filepath.Join(home, "marker-value"))
 				if err != nil {
 					t.Fatalf("read marker: %v\n%s", err, buf)
