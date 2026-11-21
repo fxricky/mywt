@@ -253,6 +253,53 @@ func TestPromptPOSIXEnv(t *testing.T) {
 	}
 }
 
+func TestPromptPOSIXEnvExpansion(t *testing.T) {
+	cases := []struct {
+		name, envVal, wantEnv, wantMarker string
+	}{
+		{name: "dollar-home", envVal: "$HOME/.shrc", wantEnv: "$HOME/.shrc", wantMarker: "from-env"},
+		{name: "brace-home", envVal: "${HOME}/.shrc", wantEnv: "${HOME}/.shrc", wantMarker: "from-env"},
+		{name: "absolute", wantMarker: "from-env"},
+		{name: "empty"},
+	}
+	for _, shellName := range []string{"sh", "dash"} {
+		shellPath := requireShell(t, shellName)
+		for _, tc := range cases {
+			t.Run(shellName+"/"+tc.name, func(t *testing.T) {
+				home := t.TempDir()
+				writeFile(t, filepath.Join(home, ".shrc"), "MYWT_ENV_MARKER=from-env\nexport MYWT_ENV_MARKER\nPS1='$ '\n")
+				var extra []string
+				wantEnv := tc.wantEnv
+				switch tc.name {
+				case "absolute":
+					envFile := filepath.Join(home, "myenv")
+					writeFile(t, envFile, "MYWT_ENV_MARKER=from-env\nexport MYWT_ENV_MARKER\nPS1='$ '\n")
+					extra = []string{"ENV=" + envFile}
+					wantEnv = envFile
+				case "empty":
+				default:
+					extra = []string{"ENV=" + tc.envVal}
+				}
+				master, done := startTaggedShell(t, shellPath, home, "auth-refactor", extra, false)
+				buf := waitPty(t, master, "(mywt:auth-refactor)", 8*time.Second)
+				mustWrite(t, master, "printf '%s\\n' \"${MYWT_ENV_MARKER-}\" > \"$HOME/marker-value\"\nprintf '%s\\n' \"${ENV-}\" > \"$HOME/env-value\"\nexit\n")
+				waitLaunch(t, done, buf)
+				marker, err := os.ReadFile(filepath.Join(home, "marker-value"))
+				if err != nil {
+					t.Fatalf("read marker: %v\n%s", err, buf)
+				}
+				gotEnv, err := os.ReadFile(filepath.Join(home, "env-value"))
+				if err != nil {
+					t.Fatalf("read ENV: %v\n%s", err, buf)
+				}
+				if strings.TrimRight(string(marker), "\n") != tc.wantMarker || strings.TrimRight(string(gotEnv), "\n") != wantEnv {
+					t.Fatalf("marker %q ENV %q, want marker %q ENV %q\n%s", marker, gotEnv, tc.wantMarker, wantEnv, buf)
+				}
+			})
+		}
+	}
+}
+
 func TestPromptHostileNameRunsNothing(t *testing.T) {
 	bash := requireShell(t, "bash")
 	home := t.TempDir()

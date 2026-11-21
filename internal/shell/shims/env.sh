@@ -5,8 +5,15 @@ __mywt_tmpdir=${TMPDIR:-/tmp}
 while [ "${__mywt_tmpdir%/}" != "$__mywt_tmpdir" ]; do
   __mywt_tmpdir=${__mywt_tmpdir%/}
 done
-if [ -n "${MYWT_ORIG_ENV-}" ] && [ -r "$MYWT_ORIG_ENV" ]; then
-  . "$MYWT_ORIG_ENV"
+# POSIX expands ENV (parameter expansion) before using it. A value such as
+# $HOME/.shrc is not a literal path. Expand it the same way, inside quotes,
+# and skip it if the value is malformed. The original text is restored below.
+__mywt_env=
+if [ -n "${MYWT_ORIG_ENV-}" ]; then
+  eval "__mywt_env=\"$MYWT_ORIG_ENV\"" || __mywt_env=
+fi
+if [ -n "${__mywt_env-}" ] && [ -r "$__mywt_env" ]; then
+  . "$__mywt_env"
 fi
 if [ -n "${MYWT_ORIG_ENV-}" ]; then
   ENV=$MYWT_ORIG_ENV
@@ -38,4 +45,4 @@ case $__mywt_base in
     esac
     ;;
 esac
-unset MYWT_SHIM_DIR __mywt_base __mywt_parent __mywt_tmpdir
+unset MYWT_SHIM_DIR __mywt_base __mywt_parent __mywt_tmpdir __mywt_env
