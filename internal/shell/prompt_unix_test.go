@@ -58,6 +58,94 @@ func TestPromptBashPROMPTCommand(t *testing.T) {
 	}
 }
 
+// TestPromptBashPROMPTCommandTerminators checks values that are already
+// terminated. Joining them with ';' produced ';;' and a syntax error before
+// every prompt, so the user's command and the tag hook both stopped running.
+func TestPromptBashPROMPTCommandTerminators(t *testing.T) {
+	bash := requireShell(t, "bash")
+	cases := []struct {
+		name, command, kind string
+	}{
+		{name: "semicolon", command: "history -a;", kind: "history"},
+		{name: "semicolon-space", command: "history -a; ", kind: "history"},
+		{name: "ampersand", command: "history -a &", kind: "history"},
+		{name: "trailing-newline", command: "history -a\n", kind: "history"},
+		{name: "two-commands", command: "a; b", kind: "commands"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			var rc strings.Builder
+			rc.WriteString("PS1='$ '\n")
+			if tc.kind == "history" {
+				rc.WriteString("HISTFILE=\"$HOME/histmarker\"\nset -o history\n")
+			} else {
+				rc.WriteString("a() { printf x >> \"$HOME/ran-a\"; }\n")
+				rc.WriteString("b() { printf x >> \"$HOME/ran-b\"; }\n")
+			}
+			rc.WriteString("PROMPT_COMMAND=" + bashDollarQuote(tc.command) + "\n")
+			writeFile(t, filepath.Join(home, ".bashrc"), rc.String())
+			writeFile(t, filepath.Join(home, ".hushlogin"), "")
+			master, done := startTaggedShell(t, bash, home, "auth-refactor", nil, false)
+			buf := waitPty(t, master, "(mywt:auth-refactor) $ ", 8*time.Second)
+			mustWrite(t, master, "echo SENTINEL\nclear\ntrue\nexit\n")
+			buf = append(buf, waitPty(t, master, "SENTINEL", 5*time.Second)...)
+			buf = append(buf, waitPty(t, master, "true", 5*time.Second)...)
+			waitLaunch(t, done, buf)
+			buf = append(buf, readPtyRest(t, master)...)
+			if bytes.Contains(buf, []byte("syntax error")) || bytes.Contains(buf, []byte("unexpected token")) {
+				t.Fatalf("PROMPT_COMMAND %q produced a syntax error:\n%s", tc.command, buf)
+			}
+			cleared := buf
+			if i := bytes.Index(buf, []byte("clear")); i >= 0 {
+				cleared = buf[i:]
+			}
+			if !bytes.Contains(cleared, []byte("(mywt:auth-refactor) $ ")) {
+				t.Fatalf("tag missing after clear for %q:\n%s", tc.command, buf)
+			}
+			if tc.kind == "history" {
+				deadline := time.Now().Add(2 * time.Second)
+				var hist []byte
+				var err error
+				for {
+					hist, err = os.ReadFile(filepath.Join(home, "histmarker"))
+					if err == nil && bytes.Contains(hist, []byte("SENTINEL")) {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatalf("history -a did not record SENTINEL (%v): %q\n%s", err, hist, buf)
+					}
+					time.Sleep(20 * time.Millisecond)
+				}
+				return
+			}
+			for _, name := range []string{"ran-a", "ran-b"} {
+				if _, err := os.Stat(filepath.Join(home, name)); err != nil {
+					t.Fatalf("command %s did not run: %v\n%s", name, err, buf)
+				}
+			}
+		})
+	}
+}
+
+func bashDollarQuote(s string) string {
+	var b strings.Builder
+	b.WriteString("$'")
+	for _, r := range s {
+		switch r {
+		case '\\', '\'':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		case '\n':
+			b.WriteString(`\n`)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('\'')
+	return b.String()
+}
+
 func TestPromptZshSurvivesClear(t *testing.T) {
 	zsh := requireShell(t, "zsh")
 	home := t.TempDir()

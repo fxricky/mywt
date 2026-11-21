@@ -34,7 +34,13 @@ case $__mywt_pc in
     if [ -z "${PROMPT_COMMAND-}" ]; then
       PROMPT_COMMAND=__mywt_prompt_tag
     else
-      PROMPT_COMMAND="${PROMPT_COMMAND};__mywt_prompt_tag"
+      # A newline stays valid when the existing value already ends in ';',
+      # '&', whitespace, or a newline. A ';' separator turns 'history -a;'
+      # into ';;', which is a syntax error before every prompt.
+      case $PROMPT_COMMAND in
+        *__mywt_prompt_tag*) ;;
+        *) PROMPT_COMMAND="${PROMPT_COMMAND}"$'\n''__mywt_prompt_tag' ;;
+      esac
     fi
     ;;
 esac
