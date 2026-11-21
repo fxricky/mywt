@@ -40,7 +40,7 @@ func TestOpenShellUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := filepath.Join(t.TempDir(), "shell")
-	body := "#!/bin/sh\nprintf 'OPEN_SHELL\\n'\npwd\n"
+	body := "#!/bin/sh\nprintf 'OPEN_SHELL\\n'\nprintf 'ARGS:%s\\n' \"$*\"\nprintf 'ZDOT:%s\\n' \"${ZDOTDIR-}\"\nprintf 'ENVV:%s\\n' \"${ENV-}\"\nprintf 'TAG:%s\\n' \"${MYWT_PROMPT_TAG-}\"\npwd\n"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -61,9 +61,12 @@ func TestOpenShellUnchanged(t *testing.T) {
 	if !strings.Contains(text, "OPEN_SHELL") || !strings.Contains(text, s.Dir()) {
 		t.Fatalf("shell did not run in the session directory:\n%s", text)
 	}
-	for _, bad := range []string{"╭", "╰", "[mywt:", "left mywt", "Type exit to return", "\033[22;0t"} {
+	for _, bad := range []string{"╭", "╰", "[mywt:", "left mywt", "Type exit to return", "\033[22;0t", "(mywt:", "--rcfile", "mywt-prompt-"} {
 		if strings.Contains(text, bad) {
-			t.Fatalf("open --shell printed a frame (%q):\n%s", bad, text)
+			t.Fatalf("open --shell changed (%q):\n%s", bad, text)
 		}
+	}
+	if !strings.Contains(text, "ARGS:\n") || !strings.Contains(text, "ZDOT:\n") || !strings.Contains(text, "ENVV:\n") || !strings.Contains(text, "TAG:\n") {
+		t.Fatalf("open --shell env was not empty:\n%s", text)
 	}
 }

@@ -49,9 +49,11 @@ func TestRootHelpDocumentsSelector(t *testing.T) {
 		"tmux",
 		"auth-refactor",
 		"wt-<timestamp>",
-		"No shell rc changes",
+		"does not edit shell rc files",
 		"--no-frame",
-		"does not change your prompt",
+		"--no-prompt-tag",
+		"(mywt:<name>) ",
+		"does not edit",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("root help missing %q\n%s", want, text)

@@ -49,10 +49,11 @@ func runInteractiveSelector() {
 		label = s.ID
 	}
 	err = shell.Launch(shell.Options{
-		Dir:       s.Dir(),
-		Label:     label,
-		SessionID: s.ID,
-		NoFrame:   noFrame,
+		Dir:         s.Dir(),
+		Label:       label,
+		SessionID:   s.ID,
+		NoFrame:     noFrame,
+		NoPromptTag: noPromptTag,
 	})
 	var exitErr *shell.ExitError
 	if errors.As(err, &exitErr) {

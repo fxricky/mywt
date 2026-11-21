@@ -1,0 +1,36 @@
+# Sourced by bash --rcfile. The user's bashrc runs first; the tag is added
+# on top and again at the end of PROMPT_COMMAND. The session name is never
+# written into this file. It is read from $MYWT_PROMPT_TAG.
+if [ -r "$HOME/.bashrc" ]; then
+  . "$HOME/.bashrc" || true
+fi
+
+__mywt_prompt_tag() {
+  local status=$?
+  if [ -n "${MYWT_PARENT_PROMPT_TAG-}" ]; then
+    case ${PS1-} in
+      "$MYWT_PARENT_PROMPT_TAG"*) PS1=${PS1#"$MYWT_PARENT_PROMPT_TAG"} ;;
+    esac
+  fi
+  case ${PS1-} in
+    "$MYWT_PROMPT_TAG"*) ;;
+    *) PS1="${MYWT_PROMPT_TAG}${PS1-}" ;;
+  esac
+  return "$status"
+}
+__mywt_prompt_tag
+
+__mywt_pc=$(declare -p PROMPT_COMMAND 2>/dev/null || true)
+case $__mywt_pc in
+  'declare -a'*)
+    PROMPT_COMMAND+=(__mywt_prompt_tag)
+    ;;
+  *)
+    if [ -z "${PROMPT_COMMAND-}" ]; then
+      PROMPT_COMMAND=__mywt_prompt_tag
+    else
+      PROMPT_COMMAND="${PROMPT_COMMAND};__mywt_prompt_tag"
+    fi
+    ;;
+esac
+unset __mywt_pc

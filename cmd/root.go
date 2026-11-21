@@ -11,6 +11,7 @@ import (
 )
 
 var noFrame bool
+var noPromptTag bool
 
 var rootCmd = &cobra.Command{
 	Use:   "mywt",
@@ -22,14 +23,18 @@ pick starts an interactive shell (from $SHELL when that program exists, otherwis
 whose working directory is the session root: the folder that contains every
 repository worktree, not one of those worktrees. The session root is not itself
 a git repository. exit returns to the shell and directory you started from.
-No shell rc changes and no tmux are required.
+It does not edit shell rc files and does not use tmux.
 
 On a terminal the shell is wrapped in a frame naming the session, the session
 root, and the directory exit returns to. A footer then reports the shell's
 exit status. --no-frame, or MYWT_NO_FRAME=1, prints the plain banner instead.
-mywt does not change your prompt. When the terminal supports it, the window
-title is set to "mywt: <session>" and restored on exit. That is not a pinned
-header.
+Picker sessions add "(mywt:<name>) " to the front of your existing prompt.
+mywt does not edit .bashrc, .zshrc, fish config, or any other file: it loads
+your config first and adds the tag on top. --no-prompt-tag, or
+MYWT_NO_PROMPT_TAG=1, leaves the prompt unchanged and does not turn the frame
+off. --no-frame does not turn the tag off. When the terminal supports it, the
+window title is set to "mywt: <session>" and restored on exit. That is not a
+pinned header.
 
 Each session is stored under ~/.mywt/worktree-<YYYYMMDDHHmmss>/. A named
 session's repositories default to a git branch of that same name. Unnamed
@@ -53,6 +58,7 @@ Typical workflow:
 
 func init() {
 	rootCmd.Flags().BoolVar(&noFrame, "no-frame", false, "print the plain session banner instead of the subshell frame")
+	rootCmd.Flags().BoolVar(&noPromptTag, "no-prompt-tag", false, "do not add (mywt:<name>) to the front of the shell prompt")
 }
 
 // Execute runs the root command.

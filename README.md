@@ -128,14 +128,46 @@ Starting `mywt` from inside a session prints a warning and marks the frame
 terminal, the same facts are printed as plain text, with no box and no title
 sequences.
 
+Picker sessions add `(mywt:<name>) ` to the front of your existing prompt.
+mywt does not edit `.bashrc`, `.zshrc`, fish config, or any other file. It
+loads your config first and adds the tag on top. The shim files live in a
+private temp directory and are removed when the shell exits.
+
+- bash is started with `--rcfile`. That file sources `~/.bashrc`, then prefixes
+  `PS1` and appends the same step to `PROMPT_COMMAND` so a framework that
+  rebuilds the prompt still keeps the tag.
+- zsh gets a temporary `ZDOTDIR` that sources your `.zshenv` and `.zshrc`
+  (including a `ZDOTDIR` your `.zshenv` points at) and then hooks `precmd`.
+  Inside the session, `ZDOTDIR` is yours again.
+- fish is started with `--init-command`, which wraps `fish_prompt` after
+  `config.fish` has run.
+- `sh`, `dash`, `ash`, `ksh`, and `mksh` (and bash invoked as `sh`) use the
+  POSIX `ENV` file. Your previous `ENV` is sourced and then restored.
+- Other shells (nu, xonsh, tcsh, elvish, and anything else) are started exactly
+  as before, with no tag and no error. `$MYWT_SESSION` is still set.
+
+`--no-prompt-tag`, or `MYWT_NO_PROMPT_TAG=1`, turns the tag off and leaves the
+frame alone. `--no-frame` turns the frame off and leaves the tag alone. The
+two switches are independent. With the tag off, `$MYWT_PROMPT_TAG` is not set;
+use `$MYWT_SESSION` from your own prompt config (starship, for example).
+
+A nested picker session keeps the warning and the frame's `(nested in X)`, and
+the prompt becomes `(mywt:<parent>><name>) `, for example
+`(mywt:auth-refactor>spike) `. Only the immediate parent is shown.
+
+`exec bash` or `exec zsh` inside the session starts a fresh shell and drops
+the tag. A fish prompt that a framework redefines on a later event (tide on a
+variable change, for example) can drop the tag. Powerlevel10k's instant prompt
+can appear briefly before the tag. `mywt open --shell` does not add a tag.
+
 `claude` and `codex`, if installed, can be started from the session root
 without `cd`-ing into a child repository. They can see the child folders
 subject to each tool's own filesystem permissions and trust settings. `mywt`
 does not launch them for you.
 
 The environment of that shell includes `MYWT_SESSION` (the name, or the id),
-`MYWT_SESSION_ID`, and `MYWT_SESSION_ROOT`. `mywt` does not change your prompt.
-You can reference `MYWT_SESSION` from your own prompt config if you want it there.
+`MYWT_SESSION_ID`, `MYWT_SESSION_ROOT`, and, when the tag is on,
+`MYWT_PROMPT_TAG`.
 
 `mywt open` is unchanged. With no flags it prints a path (session root, or one
 project). `--shell` still spawns a shell in that path, and `--editor` still

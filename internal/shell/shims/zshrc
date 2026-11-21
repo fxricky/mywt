@@ -1,0 +1,33 @@
+# Restore the user's ZDOTDIR, source their .zshrc, then keep the tag on PROMPT.
+if [ -n "${__mywt_real_zdotdir-}" ]; then
+  ZDOTDIR=$__mywt_real_zdotdir
+fi
+if [ -n "${ZDOTDIR-}" ] && [ -f "$ZDOTDIR/.zshrc" ]; then
+  . "$ZDOTDIR/.zshrc"
+fi
+
+autoload -Uz add-zsh-hook
+
+__mywt_prompt_tag() {
+  local __mywt_status=$?
+  if [ -n "${MYWT_PARENT_PROMPT_TAG-}" ]; then
+    case ${PROMPT-} in
+      "$MYWT_PARENT_PROMPT_TAG"*) PROMPT=${PROMPT#"$MYWT_PARENT_PROMPT_TAG"} ;;
+    esac
+  fi
+  case ${PROMPT-} in
+    "$MYWT_PROMPT_TAG"*) ;;
+    *) PROMPT="${MYWT_PROMPT_TAG}${PROMPT-}" ;;
+  esac
+  # Frameworks such as powerlevel10k register their own precmd on the first
+  # prompt and set PROMPT there. Move this hook to the end once, so the
+  # following prompts are tagged after those frameworks run.
+  if [ -z "${__mywt_prompt_parked-}" ]; then
+    __mywt_prompt_parked=1
+    precmd_functions=(${precmd_functions:#__mywt_prompt_tag} __mywt_prompt_tag)
+  fi
+  return $__mywt_status
+}
+
+__mywt_prompt_tag
+add-zsh-hook precmd __mywt_prompt_tag

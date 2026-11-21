@@ -164,6 +164,7 @@ def main():
         rec.enter()
 
         rec.wait_for("mywt: auth-refactor", 5)
+        rec.wait_for("(mywt:auth-refactor)", 5)
         rec.pause(1.0)
         rec.type_text("pwd")
         rec.enter()
@@ -197,6 +198,7 @@ def main():
             "Select a session",
             "> auth-refactor",
             "mywt: auth-refactor",
+            "(mywt:auth-refactor)",
             ".mywt/worktree-",
             "backend",
             "frontend",

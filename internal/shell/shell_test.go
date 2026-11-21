@@ -127,7 +127,8 @@ func TestLaunchUsesSessionRootAndInteractiveArgs(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{
-		"ARGS:-i",
+		"ARGS:--rcfile",
+		"-i",
 		"PWD:" + sessionDir,
 		"SESSION:auth-refactor",
 		"ROOT:" + sessionDir,

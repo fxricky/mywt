@@ -39,6 +39,8 @@ type Options struct {
 	Env []string
 	// NoFrame keeps the plain startup banner. MYWT_NO_FRAME=1 does the same.
 	NoFrame bool
+	// NoPromptTag leaves the shell prompt unchanged. MYWT_NO_PROMPT_TAG=1 does the same.
+	NoPromptTag bool
 }
 
 // Launch starts an interactive child shell whose working directory is the
@@ -48,7 +50,10 @@ type Options struct {
 // with the real exit status. The window title is saved and restored. A pipe
 // gets a plain banner and the footer, with no box and no title sequences.
 // NoFrame, or MYWT_NO_FRAME=1, keeps the original banner and does not print a
-// footer. The shell prompt is never modified.
+// footer. Unless NoPromptTag or MYWT_NO_PROMPT_TAG=1 is set, a known shell
+// gets "(mywt:<name>) " in front of the prompt it builds from the user's rc
+// files. Those files are only sourced. The shims live in a private temp
+// directory that is removed when Launch returns.
 //
 // The title is not a pinned header; mywt does not stay in front of the shell
 // to redraw one, and it does not allocate a PTY or run tmux. The child is a
@@ -138,7 +143,34 @@ func Launch(opts Options) error {
 		}
 	}
 
-	cmd, err := shellCommand(shellPath, dir, sessionEnv(env, label, dir, opts.SessionID))
+	childEnv := dropEnvKeys(sessionEnv(env, label, dir, opts.SessionID), "MYWT_PROMPT_TAG", "MYWT_PARENT_PROMPT_TAG")
+	args := shellArgs(shellPath)
+	tagOn := !opts.NoPromptTag && !envEquals(env, "MYWT_NO_PROMPT_TAG", "1")
+	if tagOn && promptFamily(shellPath) != "" {
+		shimDir := ""
+		if promptFamily(shellPath) != "fish" {
+			var err error
+			shimDir, err = os.MkdirTemp("", "mywt-prompt-*")
+			if err != nil {
+				return fmt.Errorf("create prompt dir: %w", err)
+			}
+			defer os.RemoveAll(shimDir)
+		}
+		parentName := ""
+		if nested {
+			parentName = parent
+		}
+		inheritedTag, _ := lookupEnv(env, "MYWT_PROMPT_TAG")
+		plan := planShell(shellPath, shimDir, PromptTag(label, parentName), inheritedTag, env)
+		if len(plan.Files) > 0 {
+			if err := writePromptFiles(shimDir, plan.Files); err != nil {
+				return err
+			}
+		}
+		args = plan.Args
+		childEnv = replaceEnv(childEnv, plan.Env)
+	}
+	cmd, err := shellCommand(shellPath, dir, args, childEnv)
 	if err != nil {
 		return err
 	}

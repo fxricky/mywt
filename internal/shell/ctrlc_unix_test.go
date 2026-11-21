@@ -4,7 +4,6 @@ package shell
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -212,20 +211,25 @@ func readPtyUntil(t *testing.T, master *os.File, needle string, d time.Duration)
 		if bytes.Contains(buf.Bytes(), []byte(needle)) {
 			return buf.Bytes()
 		}
-		if time.Now().After(deadline) {
+		remain := time.Until(deadline)
+		if remain <= 0 {
 			t.Fatalf("timed out waiting for %q; got %q", needle, buf.String())
 		}
-		_ = master.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-		n, err := master.Read(tmp)
-		if n > 0 {
-			buf.Write(tmp[:n])
+		wait := 100 * time.Millisecond
+		if remain < wait {
+			wait = remain
 		}
-		if err == nil || errors.Is(err, os.ErrDeadlineExceeded) {
+		pfd := []unix.PollFd{{Fd: int32(master.Fd()), Events: unix.POLLIN}}
+		n, err := unix.Poll(pfd, int(wait.Milliseconds()))
+		if err != nil || n == 0 {
 			continue
 		}
-		if ne, ok := err.(interface{ Timeout() bool }); ok && ne.Timeout() {
-			continue
+		nread, err := master.Read(tmp)
+		if nread > 0 {
+			buf.Write(tmp[:nread])
 		}
-		t.Fatalf("read pty: %v; got %q", err, buf.String())
+		if nread == 0 && err != nil {
+			t.Fatalf("read pty: %v; got %q", err, buf.String())
+		}
 	}
 }
