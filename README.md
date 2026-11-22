@@ -124,33 +124,31 @@ A commit that is not on `main` is refused before a tag is created.
 
 Pushing `vMAJOR.MINOR.PATCH` runs GitHub Actions
 (`.github/workflows/release.yml`). The build job checks that the tagged
-commit is on `origin/main`, tests, and cross-compiles the macOS arm64 and
-amd64 binaries. The publish job (environment `release`) attests those
-binaries, then publishes. A tag that is not semver, or a tag whose commit is
-not on `main`, fails before anything is published.
+commit is on `origin/main`, tests, and runs GoReleaser
+(`goreleaser release --clean --skip=publish`) from `.goreleaser.yaml`.
+That builds macOS arm64 and amd64 binaries, with the tag injected as
+`v<version>`. The publish job (environment `release`) attests those
+binaries, creates a draft with `gh release create --verify-tag --draft`,
+uploads the assets, checks the uploaded bytes against `mywt_checksums.txt`,
+and only then publishes with `gh release edit --draft=false`. A tag that is
+not semver, or a tag whose commit is not on `main`, fails before anything
+is published.
 
-A new release is created as a draft with `gh release create --verify-tag
---draft`. The workflow uploads the assets, checks that the uploaded bytes
-match the built checksums, and only then publishes with `gh release edit
---draft=false`. A pre-release tag such as `v1.0.0-rc.1` stays a GitHub
-prerelease, so `scripts/install.sh` (which installs `/releases/latest`) does
-not pick up a release candidate. A stable tag, including one with build
+A pre-release tag such as `v1.0.0-rc.1` is published as a GitHub prerelease
+(`.goreleaser.yaml` sets `prerelease: auto`). `scripts/install.sh` installs
+`/releases/latest`, which ignores prereleases, so a release candidate does
+not replace the stable install. A stable tag, including one with build
 metadata such as `v1.0.0+build`, stays a normal release.
 
-Two ways to do the same thing from the GitHub website:
+If a GitHub release for the tag already exists, the publish job fails and
+does not change its title, notes, or assets. Create the tag only. Do not
+create the release in the GitHub UI first.
 
-- **Tag only.** Create the tag in the GitHub UI. That is a tag push, so the
-  workflow runs and creates the release.
-- **Draft a new release.** On the Releases page, choose "Draft a new release",
-  enter a new tag, and publish. GitHub creates the tag and the release
-  together. The tag push starts one build. The release already exists, so the
-  workflow uploads only asset names that are not already there and does not
-  change the title or notes. If one of the release assets is already present,
-  the job fails instead of replacing it.
-
-`scripts/release.sh --build-only v1.0.0` only writes `dist/`. It does not tag,
-push, or publish. That is the command Actions runs, and it is safe to dry-run
-locally.
+`goreleaser release --snapshot --clean` writes `dist/` and does not tag,
+push, or publish. The checksum file lists `mywt_darwin_arm64` and
+`mywt_darwin_amd64`, which are the asset names `scripts/install.sh`
+downloads. On disk the binaries are `dist/mywt_darwin_<arch>_*/mywt`.
+`mywt version` prints the injected tag.
 
 ### Repository settings
 
@@ -164,10 +162,8 @@ The workflow does not change repository administration. Set these yourself:
 - Branch protection on `main`: require a pull request, and block force pushes
   and deletion. Releases are built only from commits already on `main`.
 - Immutable releases (Settings, General, Immutable releases). A published
-  release then keeps its tag and assets. Leave a release created in the
-  GitHub UI as a draft until Actions has uploaded the assets; a published
-  immutable release rejects new files. The tag-only path already uploads
-  while the release is still a draft, then publishes.
+  release then keeps its tag and assets. The workflow creates its own draft,
+  uploads, checks the checksums, and only then publishes.
 
 ## License
 
