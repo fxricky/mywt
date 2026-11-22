@@ -1,23 +1,16 @@
 name: Release
 
-# Two ways to start a release. Only one run publishes it.
+# The only way to publish a release. Actions, Release, Run workflow takes a
+# version and must be started from main. scripts/release.sh starts that same
+# run. It does not tag or push.
 #
-# workflow_dispatch (Actions, Release, Run workflow) takes a version and
-# must be started from main. After the release environment is approved, the
-# publish job creates the tag at this run's GITHUB_SHA and pushes it with
-# the workflow GITHUB_TOKEN. A tag push authenticated as GITHUB_TOKEN does
-# not start the push trigger, so this run is the only one.
-# https://docs.github.com/en/actions/using-workflows/triggering-a-workflow#triggering-a-workflow-from-a-workflow
-#
-# push of v*.*.* is what scripts/release.sh does. That push uses the
-# pusher's credentials, not GITHUB_TOKEN, so this workflow starts. The tag
-# already exists; the publish job does not create another one.
-#
-# Both paths then create a draft with `gh release create --draft
-# --verify-tag`, upload the assets without replacing existing names, compare
-# the download to dist/, and publish the draft. A release that already
-# exists is left alone. The assets are attached before the release is
-# published, which is what immutable releases require.
+# After the release environment is approved, the publish job creates the tag
+# at this run's GITHUB_SHA and pushes it with the workflow GITHUB_TOKEN.
+# It then creates a draft with `gh release create --draft --verify-tag`,
+# uploads the assets without replacing existing names, compares the download
+# to dist/, and publishes the draft. A tag or release that already exists
+# stops the job. The assets are attached before the release is published,
+# which is what immutable releases require.
 #
 # The tag name is passed to the shell through RELEASE_TAG. Nothing in a
 # `run` script reads ${{ }}.
@@ -29,24 +22,19 @@ on:
         description: "Release version, for example 1.1.0 or v1.1.0"
         required: true
         type: string
-  push:
-    tags:
-      - "v*.*.*"
 
 # Jobs opt in below. The build job cannot publish. The publish job is the
 # only one that can create a tag, upload release assets, or write an
 # attestation.
 permissions: {}
 
-# 1.1.0 and v1.1.0 share a group with a pushed v1.1.0 tag. On a tag push,
-# github.event.inputs.version is empty and the group is github.ref_name.
+# 1.1.0 and v1.1.0 share one group.
 concurrency:
-  group: release-${{ github.event_name == 'workflow_dispatch' && (startsWith(github.event.inputs.version, 'v') && github.event.inputs.version || format('v{0}', github.event.inputs.version)) || github.ref_name }}
+  group: release-${{ startsWith(github.event.inputs.version, 'v') && github.event.inputs.version || format('v{0}', github.event.inputs.version) }}
   cancel-in-progress: false
 
 env:
-  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && (startsWith(github.event.inputs.version, 'v') && github.event.inputs.version || format('v{0}', github.event.inputs.version)) || github.ref_name }}
-  RELEASE_EVENT: ${{ github.event_name }}
+  RELEASE_TAG: ${{ startsWith(github.event.inputs.version, 'v') && github.event.inputs.version || format('v{0}', github.event.inputs.version) }}
 
 jobs:
   build:
@@ -70,26 +58,22 @@ jobs:
             echo "error: ${RELEASE_TAG} is not a valid semver tag; refusing to build" >&2
             exit 1
           fi
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "error: workflow_dispatch must run from refs/heads/main (got ${GITHUB_REF})" >&2
+            exit 1
+          fi
           git fetch origin main --tags
-          if [ "$RELEASE_EVENT" = "workflow_dispatch" ]; then
-            if [ "$GITHUB_REF" != "refs/heads/main" ]; then
-              echo "error: workflow_dispatch must run from refs/heads/main (got ${GITHUB_REF})" >&2
-              exit 1
-            fi
-            if [ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]; then
-              echo "error: checked out $(git rev-parse HEAD), expected ${GITHUB_SHA}" >&2
-              exit 1
-            fi
-            remote_tag="$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}")"
-            if [ -n "$remote_tag" ]; then
-              echo "error: tag ${RELEASE_TAG} already exists; refusing to build" >&2
-              exit 1
-            fi
-          else
-            git checkout --detach "$RELEASE_TAG"
+          if [ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]; then
+            echo "error: checked out $(git rev-parse HEAD), expected ${GITHUB_SHA}" >&2
+            exit 1
           fi
           if ! git merge-base --is-ancestor HEAD origin/main; then
             echo "error: ${RELEASE_TAG} ($(git rev-parse HEAD)) is not on origin/main; refusing to build" >&2
+            exit 1
+          fi
+          remote_tag="$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}")"
+          if [ -n "$remote_tag" ]; then
+            echo "error: tag ${RELEASE_TAG} already exists; refusing to build" >&2
             exit 1
           fi
 
@@ -160,26 +144,22 @@ jobs:
             echo "error: ${RELEASE_TAG} is not a valid semver tag; refusing to publish" >&2
             exit 1
           fi
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "error: workflow_dispatch must run from refs/heads/main (got ${GITHUB_REF})" >&2
+            exit 1
+          fi
           git fetch origin main --tags
-          if [ "$RELEASE_EVENT" = "workflow_dispatch" ]; then
-            if [ "$GITHUB_REF" != "refs/heads/main" ]; then
-              echo "error: workflow_dispatch must run from refs/heads/main (got ${GITHUB_REF})" >&2
-              exit 1
-            fi
-            if [ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]; then
-              echo "error: checked out $(git rev-parse HEAD), expected ${GITHUB_SHA}" >&2
-              exit 1
-            fi
-            remote_tag="$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}")"
-            if [ -n "$remote_tag" ]; then
-              echo "error: tag ${RELEASE_TAG} already exists; refusing to publish" >&2
-              exit 1
-            fi
-          else
-            git checkout --detach "$RELEASE_TAG"
+          if [ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]; then
+            echo "error: checked out $(git rev-parse HEAD), expected ${GITHUB_SHA}" >&2
+            exit 1
           fi
           if ! git merge-base --is-ancestor HEAD origin/main; then
             echo "error: ${RELEASE_TAG} ($(git rev-parse HEAD)) is not on origin/main; refusing to publish" >&2
+            exit 1
+          fi
+          remote_tag="$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}")"
+          if [ -n "$remote_tag" ]; then
+            echo "error: tag ${RELEASE_TAG} already exists; refusing to publish" >&2
             exit 1
           fi
 
@@ -197,7 +177,6 @@ jobs:
             dist/mywt_darwin_amd64
 
       - name: Create the release tag
-        if: github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_PROMPT_DISABLED: "1"
@@ -210,8 +189,7 @@ jobs:
           fi
           git tag "$RELEASE_TAG" "$GITHUB_SHA"
           # Credentials come from GH_TOKEN for this push only. Checkout does
-          # not persist a token. The pusher is github-actions[bot], so the
-          # tag push does not start the push trigger of this workflow.
+          # not persist a token.
           git \
             -c credential.https://github.com.helper= \
             -c 'credential.https://github.com.helper=!gh auth git-credential' \
