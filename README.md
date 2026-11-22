@@ -252,42 +252,63 @@ share it.
 
 ## Releasing
 
-Merging to `main` does not publish a release. Publish a GitHub release whose
-tag points at a commit on `main`. That is what starts the build.
+Merging to `main` does not publish a release. GitHub Actions builds a
+release from a commit that is already on `main`, then creates the GitHub
+release.
 
-From the Releases page, draft a new release, choose a new tag on `main`, and
-publish it. Or, from a clean checkout of that commit:
+From the Actions tab, open Release and choose Run workflow. The branch must
+be `main`. Enter the version as `1.1.0` or `v1.1.0`. Or, from a clean
+checkout of that commit:
 
 ```sh
-scripts/release.sh 1.0.0
+scripts/release.sh 1.1.0
 ```
 
 `scripts/release.sh` checks that the version is semver and that `HEAD` is
-already on `origin/main`, pushes the tag, and publishes the release with
-`gh release create --verify-tag`. A semver pre-release tag such as
-`v1.0.0-rc.1` is marked as a prerelease. Mark the same checkbox on the
-Releases page when you create a release candidate there. `scripts/install.sh`
-installs `/releases/latest`, which ignores prereleases.
+already on `origin/main`, then tags `v<version>` and pushes that tag. It
+does not create a GitHub release. Pushing the tag starts the Release
+workflow. A semver pre-release tag such as `v1.1.0-rc.1` is marked as a
+prerelease when Actions creates the release. `scripts/install.sh` installs
+`/releases/latest`, which ignores prereleases.
 
-Publishing the release runs GitHub Actions (`.github/workflows/release.yml`).
-The build job checks that the tag is semver and that its commit is on
-`origin/main`, tests, and runs `scripts/build-release.sh`. That writes
+Do not create the release on the Releases page. Immutable releases stay on
+for this repository. A release created on that page is published before the
+binaries exist, and an immutable release then refuses the asset upload.
+
+The workflow (`.github/workflows/release.yml`) starts from Run workflow or
+from the tag push, and it publishes once:
+
+- Run workflow creates the tag in the publish job and pushes it with the
+  workflow `GITHUB_TOKEN`. The tag points at the `main` commit selected for
+  that run (`GITHUB_SHA`). A tag push authenticated as `GITHUB_TOKEN` does
+  not start the tag trigger, so that run is the only run. This is a git
+  push with the workflow token, not `gh release create --target`.
+- `scripts/release.sh` pushes the tag with your own credentials, which does
+  start the workflow. The tag already exists, and the publish job does not
+  create another one.
+
+The build job checks the version. Run workflow must be `refs/heads/main`,
+and it fails when that tag or a release for it already exists. A pushed tag
+must be semver, and its commit must already be on `origin/main`. The job
+tests and runs `scripts/build-release.sh`. That writes
 `dist/mywt_darwin_arm64`, `dist/mywt_darwin_amd64`, and
-`dist/mywt_checksums.txt`, with the tag injected as `v<version>`. The
-publish job (environment `release`) attests those binaries and uploads them
-onto the release that already exists. It does not create or delete a
-release, and it does not change a prerelease flag, title, or notes. If one
-of the asset names is already on the release, the job fails instead of
-replacing it. A tag that is not semver, or whose commit is not on `main`,
-fails before any upload.
+`dist/mywt_checksums.txt`, with the tag injected as `v<version>`.
 
-Pushing a tag without publishing a release does not run the workflow. The
-Releases page and `scripts/release.sh` both publish a release, so both go
-through that one event.
+The publish job uses the environment `release`. It attests the binaries.
+For Run workflow it then creates the tag, checks that the tag points at
+`GITHUB_SHA`, and pushes it. It creates a draft with `gh release create
+--draft --verify-tag --generate-notes`, and adds `--prerelease` for a
+pre-release tag. It uploads the three files without replacing an existing
+name, downloads them, and compares them to `dist/`. When they match, it
+publishes the draft with `gh release edit --draft=false`. If a release for
+the tag already exists, the job fails and leaves that release as it is. The
+release remains a draft until the uploaded files match, so it is not listed
+as the latest release while the binaries are missing.
 
-The release is public before the binaries are attached. For a short time it
-can be the latest release and have no files. `scripts/install.sh` cannot
-download them until the workflow upload finishes.
+If the upload or the comparison fails, the job stops before publishing. The
+tag, and a draft when one was created, stay in place. Delete that draft and
+the tag, then run the workflow again. A later run will not change a release
+that already exists.
 
 `scripts/build-release.sh v0.0.0-dev` writes `dist/` and does not tag, push,
 or publish. The checksum file lists `mywt_darwin_arm64` and
@@ -298,16 +319,25 @@ downloads. `mywt version` prints the injected tag.
 
 The workflow does not change repository administration. Set these yourself:
 
-- A ruleset for `v*` tags that blocks deleting or moving a tag and limits who
-  can create one.
-- An environment named `release` with required reviewers. The publish job
-  uses `environment: release`, so publishing a release waits for that
-  approval before it uploads the binaries.
-- Branch protection on `main`: require a pull request, and block force pushes
-  and deletion. Releases are built only from commits already on `main`.
-- Leave immutable releases off (Settings, General). This flow publishes the
-  release first and uploads the binaries afterward. Immutable releases reject
-  that upload.
+- An environment named `release` with Ricky as a required reviewer. The
+  publish job uses `environment: release`, so it waits for that approval
+  before it creates a tag, opens a draft, or uploads binaries.
+- A ruleset for `v*` tags that restricts updates and deletions. Ricky is the
+  only bypass actor, so only Ricky can move or delete one of these tags.
+  Leave Restrict creations off. Run workflow creates the tag by pushing it
+  with the workflow `GITHUB_TOKEN`. GitHub does not accept the built-in
+  GitHub Actions app as a ruleset bypass actor, so adding that bot to the
+  bypass list is not available for this token. `gh release create --target`
+  does not avoid the rule: the tag would still be created as the same
+  token, and Restrict creations rejects it. With creations left open, the
+  workflow can create the tag, and only Ricky can move or delete it.
+  `scripts/release.sh` pushes the tag as Ricky.
+- Branch protection on `main`: require a pull request, and block force
+  pushes and deletion. Releases are built only from commits already on
+  `main`.
+- Leave immutable releases on (Settings, General). The workflow uploads the
+  binaries to a draft and publishes that draft only after the files match.
+  A published release cannot have assets added or replaced.
 
 ## License
 

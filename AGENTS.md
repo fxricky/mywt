@@ -22,9 +22,10 @@ gofmt -w $(rg --files -g '*.go')  # format Go sources
 ```
 
 Run the local binary directly, for example `go run . list`. The release flow
-is macOS-specific and requires an authenticated GitHub CLI:
-`scripts/release.sh 0.1.0` builds both macOS architectures, creates checksums,
-tags the repository, and publishes a GitHub release.
+is macOS-specific. `scripts/release.sh 1.1.0` checks semver, requires `HEAD`
+on `origin/main`, and pushes the tag. GitHub Actions builds both macOS
+architectures, writes checksums, and publishes the release. The same
+workflow can be started from the Actions tab with a version.
 
 ## Coding Style & Naming Conventions
 
