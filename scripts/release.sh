@@ -2,9 +2,9 @@
 # Release mywt.
 #
 # Pushing a vMAJOR.MINOR.PATCH tag is what publishes a release. GitHub Actions
-# (.github/workflows/release.yml) runs GoReleaser from .goreleaser.yaml and
-# then publishes the draft. This script does not build binaries or create the
-# GitHub release, so a local tag push and Actions do not publish twice.
+# (.github/workflows/release.yml) builds the binaries and then publishes the
+# draft. This script does not build binaries or create the GitHub release, so
+# a local tag push and Actions do not publish twice.
 #
 # Usage:
 #   scripts/release.sh <version>    # tag v<version> and push it
@@ -12,7 +12,7 @@
 # <version> is 1.0.0 or v1.0.0. The leading v is optional here.
 #
 # A local build, with no tag and no GitHub release, is:
-#   goreleaser release --snapshot --clean
+#   scripts/build-release.sh v0.0.0-dev
 #
 # Tagging is refused unless HEAD is already on origin/main. The workflow
 # checks the same thing before it builds or publishes.
@@ -55,5 +55,5 @@ echo "==> Tagging ${TAG}"
 git tag "${TAG}"
 git push origin "${TAG}"
 echo "==> Pushed ${TAG}."
-echo "    GitHub Actions will test, build the macOS binaries with GoReleaser, and publish the release."
+echo "    GitHub Actions will test, build the macOS binaries, and publish the release."
 echo "    Install with: curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/fxricky/mywt/main/scripts/install.sh | bash"
