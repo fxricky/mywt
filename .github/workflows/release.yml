@@ -1,28 +1,35 @@
 name: Release
 
-# A release build runs only when a version tag is pushed.
+# A release build runs only when a GitHub release is published.
 #
-# Creating a tag on the GitHub website, or `git push origin v1.0.0`, is a
-# tag push. This workflow runs once. `release: published` is not a trigger.
+# Creating a release on the Releases page creates the tag and publishes the
+# release together. That is one `release: published` event. Pushing the tag
+# by itself is not a trigger, so the same release does not build twice.
+# scripts/release.sh creates the tag and then publishes the release with
+# `gh release create --verify-tag`, which is the same event.
 #
-# scripts/build-release.sh writes the macOS binaries and checksums. This
-# file checks that the tagged commit is on main, attests the binaries, and
-# publishes the draft only after the uploaded checksums match. If a release
-# for the tag already exists, publish fails and leaves that release unchanged.
+# The build checks that the release tag's commit is on main, then
+# scripts/build-release.sh writes the macOS binaries. The publish job attests
+# them and uploads them onto the release that already exists. It does not
+# create, edit, or delete a release. An asset name that is already present
+# fails the job.
 #
-# The concurrency group stops two runs for the same tag from publishing at
+# For a release event, GITHUB_SHA is the tagged commit and GITHUB_REF is
+# refs/tags/<tag>. The tag name still comes from the event payload through
+# the RELEASE_TAG environment variable.
+#
+# The concurrency group stops two runs for the same tag from uploading at
 # once. It is not a second trigger.
 on:
-  push:
-    tags:
-      - "v*.*.*"
+  release:
+    types: [published]
 
 # Jobs opt in below. The build job cannot publish, and the publish job is
-# the only one that can write a release or an attestation.
+# the only one that can upload release assets or write an attestation.
 permissions: {}
 
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release-${{ github.event.release.tag_name }}
   cancel-in-progress: false
 
 jobs:
@@ -33,6 +40,8 @@ jobs:
       # upload-artifact needs this once the workflow token starts with no
       # permissions. It does not allow the build job to write repository contents.
       actions: write
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -40,12 +49,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Require the tagged commit on main
+      - name: Require the release tag on main
         run: |
           set -euo pipefail
-          git fetch origin main
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "error: ${GITHUB_SHA} is not on origin/main; refusing to build a release" >&2
+          if ! printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+            echo "error: ${RELEASE_TAG} is not a valid semver tag; refusing to build" >&2
+            exit 1
+          fi
+          git fetch origin main --tags
+          git checkout --detach "$RELEASE_TAG"
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "error: ${RELEASE_TAG} ($(git rev-parse HEAD)) is not on origin/main; refusing to build" >&2
             exit 1
           fi
 
@@ -61,7 +75,7 @@ jobs:
           go vet ./...
 
       - name: Build
-        run: scripts/build-release.sh "${GITHUB_REF_NAME}"
+        run: scripts/build-release.sh "$RELEASE_TAG"
 
       - name: Upload release assets
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -85,6 +99,8 @@ jobs:
       # download-artifact from this workflow run needs this once the workflow
       # token starts with no permissions.
       actions: read
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -92,12 +108,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Require the tagged commit on main
+      - name: Require the release tag on main
         run: |
           set -euo pipefail
-          git fetch origin main
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "error: ${GITHUB_SHA} is not on origin/main; refusing to publish" >&2
+          if ! printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+            echo "error: ${RELEASE_TAG} is not a valid semver tag; refusing to publish" >&2
+            exit 1
+          fi
+          git fetch origin main --tags
+          git checkout --detach "$RELEASE_TAG"
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "error: ${RELEASE_TAG} ($(git rev-parse HEAD)) is not on origin/main; refusing to publish" >&2
             exit 1
           fi
 
@@ -114,7 +135,7 @@ jobs:
             dist/mywt_darwin_arm64
             dist/mywt_darwin_amd64
 
-      - name: Publish
+      - name: Upload assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: scripts/publish-release.sh "${GITHUB_REF_NAME}"
+        run: scripts/publish-release.sh "$RELEASE_TAG"

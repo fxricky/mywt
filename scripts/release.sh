@@ -1,26 +1,25 @@
 #!/usr/bin/env bash
 # Release mywt.
 #
-# Pushing a vMAJOR.MINOR.PATCH tag is what publishes a release. GitHub Actions
-# (.github/workflows/release.yml) builds the binaries and then publishes the
-# draft. This script does not build binaries or create the GitHub release, so
-# a local tag push and Actions do not publish twice.
+# Creating the GitHub release is what starts the build. This script checks
+# semver, requires HEAD to already be on origin/main, pushes the tag, and
+# publishes the release with `gh release create --verify-tag`. GitHub Actions
+# (.github/workflows/release.yml) then builds the binaries and uploads them
+# onto that release. Pushing a tag by itself does not start the workflow.
 #
 # Usage:
-#   scripts/release.sh <version>    # tag v<version> and push it
+#   scripts/release.sh <version>    # tag v<version>, push it, and publish the release
 #
 # <version> is 1.0.0 or v1.0.0. The leading v is optional here.
 #
 # A local build, with no tag and no GitHub release, is:
 #   scripts/build-release.sh v0.0.0-dev
 #
-# Tagging is refused unless HEAD is already on origin/main. The workflow
-# checks the same thing before it builds or publishes.
-#
-# Prerequisites for tagging:
+# Prerequisites:
 #   - A clean working tree.
 #   - HEAD is an ancestor of origin/main (including the tip of main).
-#   - Permission to push tags to fxricky/mywt.
+#   - gh, authenticated to fxricky/mywt.
+#   - Permission to push tags and create releases.
 
 set -euo pipefail
 
@@ -43,6 +42,10 @@ if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
   echo "error: tag ${TAG} already exists" >&2
   exit 1
 fi
+if ! command -v gh >/dev/null 2>&1; then
+  echo "error: gh is required to create the GitHub release" >&2
+  exit 1
+fi
 
 echo "==> Checking HEAD is on origin/main"
 git fetch origin main
@@ -54,6 +57,16 @@ fi
 echo "==> Tagging ${TAG}"
 git tag "${TAG}"
 git push origin "${TAG}"
-echo "==> Pushed ${TAG}."
-echo "    GitHub Actions will test, build the macOS binaries, and publish the release."
+
+create_args=(--verify-tag --title "$TAG" --generate-notes)
+ver="${TAG#v}"
+ver="${ver%%+*}"
+if [[ "$ver" == *-* ]]; then
+  echo "==> Publishing ${TAG} as a prerelease."
+  create_args+=(--prerelease)
+else
+  echo "==> Publishing ${TAG}."
+fi
+gh release create "$TAG" "${create_args[@]}"
+echo "    GitHub Actions will test, build the macOS binaries, and upload them to this release."
 echo "    Install with: curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/fxricky/mywt/main/scripts/install.sh | bash"
