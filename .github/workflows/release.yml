@@ -8,36 +8,53 @@ name: Release
 #     git tag and the GitHub release together. Creating that tag is still a
 #     tag push, which is the only event listened to here, so the build does
 #     not also run on release: published. The release may already exist when
-#     this job publishes; the publish step uploads artifacts onto it and leaves
-#     the title and notes alone.
+#     this job publishes. Missing assets are uploaded. An asset name that is
+#     already present fails the job. Title and notes are left alone.
 #
-# The concurrency group stops two runs for the same tag from uploading at once
-# (a re-run overlapping the original). It is not a second trigger.
+# The concurrency group stops two runs for the same tag from publishing at
+# once. It is not a second trigger.
 on:
   push:
     tags:
       - "v*.*.*"
 
-permissions:
-  contents: write
+# Jobs opt in below. The build job cannot publish, and the publish job is
+# the only one that can write a release or an attestation.
+permissions: {}
 
 concurrency:
   group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # upload-artifact needs this once the workflow token starts with no
+      # permissions. It does not allow the build job to write repository contents.
+      actions: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require the tagged commit on main
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "error: ${GITHUB_SHA} is not on origin/main; refusing to build a release" >&2
+            exit 1
+          fi
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
+          cache: false
 
       - name: Test
         run: |
@@ -47,34 +64,159 @@ jobs:
       - name: Build
         run: scripts/release.sh --build-only "${GITHUB_REF_NAME}"
 
+      - name: Upload release assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-assets
+          path: |
+            dist/mywt_darwin_arm64
+            dist/mywt_darwin_amd64
+            dist/mywt_checksums.txt
+          if-no-files-found: error
+          overwrite: false
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      # download-artifact from this workflow run needs this once the workflow
+      # token starts with no permissions.
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require the tagged commit on main
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "error: ${GITHUB_SHA} is not on origin/main; refusing to publish" >&2
+            exit 1
+          fi
+
+      - name: Download release assets
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: dist
+
+      - name: Check downloaded checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          if command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 -c mywt_checksums.txt
+          else
+            sha256sum -c mywt_checksums.txt
+          fi
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/mywt_darwin_arm64
+            dist/mywt_darwin_amd64
+
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
+          if ! printf '%s\n' "$tag" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+            echo "error: ${tag} is not a valid semver tag; refusing to publish" >&2
+            exit 1
+          fi
+
           assets=(
             dist/mywt_darwin_arm64
             dist/mywt_darwin_amd64
             dist/mywt_checksums.txt
           )
+          names=(
+            mywt_darwin_arm64
+            mywt_darwin_amd64
+            mywt_checksums.txt
+          )
+
+          (
+            cd dist
+            if command -v shasum >/dev/null 2>&1; then
+              shasum -a 256 -c mywt_checksums.txt
+            else
+              sha256sum -c mywt_checksums.txt
+            fi
+          )
+
+          # Semver prerelease (v1.0.0-rc.1, including +build) must not become
+          # /releases/latest. Build metadata alone (v1.0.0+build) stays normal.
+          version="${tag#v}"
+          version="${version%%+*}"
+          prerelease=0
+          if [[ "$version" == *-* ]]; then
+            prerelease=1
+          fi
+
+          verify_uploaded() {
+            local tmp name local_hash remote_hash
+            tmp="$(mktemp -d)"
+            gh release download "$tag" --dir "$tmp" \
+              --pattern 'mywt_darwin_arm64' \
+              --pattern 'mywt_darwin_amd64' \
+              --pattern 'mywt_checksums.txt'
+            for name in "${names[@]}"; do
+              if command -v shasum >/dev/null 2>&1; then
+                local_hash="$(shasum -a 256 "dist/${name}" | awk '{print $1}')"
+                remote_hash="$(shasum -a 256 "${tmp}/${name}" | awk '{print $1}')"
+              else
+                local_hash="$(sha256sum "dist/${name}" | awk '{print $1}')"
+                remote_hash="$(sha256sum "${tmp}/${name}" | awk '{print $1}')"
+              fi
+              if [ "$local_hash" != "$remote_hash" ]; then
+                echo "error: uploaded ${name} does not match the built file" >&2
+                echo "  built:    ${local_hash}" >&2
+                echo "  uploaded: ${remote_hash}" >&2
+                rm -rf "$tmp"
+                exit 1
+              fi
+            done
+            rm -rf "$tmp"
+            echo "Uploaded assets match the built checksums."
+          }
+
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release ${tag} already exists. Uploading artifacts; title and notes stay as they are."
-            gh release upload "$tag" "${assets[@]}" --clobber
+            echo "Release ${tag} already exists. Title and notes stay as they are."
+            existing="$(gh release view "$tag" --json assets --jq '.assets[].name')"
+            for name in "${names[@]}"; do
+              if printf '%s\n' "$existing" | grep -Fxq "$name"; then
+                echo "error: asset ${name} already exists on release ${tag}; refusing to overwrite it" >&2
+                exit 1
+              fi
+            done
+            gh release upload "$tag" "${assets[@]}"
+            verify_uploaded
           else
-            # Semver prerelease (v1.0.0-rc.1, including +build) must not become
-            # /releases/latest. scripts/install.sh installs that latest tag.
-            # Build metadata alone (v1.0.0+build) stays a normal release.
-            create_args=(--title "$tag" --generate-notes)
-            version="${tag#v}"
-            version="${version%%+*}"
-            if [[ "$version" == *-* ]]; then
+            create_args=(--verify-tag --draft --title "$tag" --generate-notes)
+            if [ "$prerelease" -eq 1 ]; then
               echo "Marking ${tag} as a prerelease so it does not become the latest release."
               create_args+=(--prerelease)
             fi
-            echo "Creating release ${tag}."
-            if ! gh release create "$tag" "${assets[@]}" "${create_args[@]}"; then
-              echo "Release ${tag} appeared while this job was publishing. Uploading artifacts instead."
-              gh release upload "$tag" "${assets[@]}" --clobber
+            echo "Creating draft release ${tag}."
+            gh release create "$tag" "${create_args[@]}"
+            gh release upload "$tag" "${assets[@]}"
+            verify_uploaded
+            edit_args=(--draft=false)
+            if [ "$prerelease" -eq 1 ]; then
+              edit_args+=(--prerelease)
             fi
+            echo "Publishing ${tag}."
+            gh release edit "$tag" "${edit_args[@]}"
           fi

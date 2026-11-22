@@ -14,11 +14,15 @@
 #
 # --build-only is what Actions runs after the tag push. It uses the same
 # ldflags, binary names, and checksum file as a local build, and it does not
-# create a tag or a release. CGO is disabled so the same command cross-compiles
-# on the Ubuntu runner; mywt has no cgo code.
+# create a tag or a release. CGO is disabled and -buildvcs=false so the same
+# command cross-compiles on the Ubuntu runner; mywt has no cgo code.
+#
+# Tagging is refused unless HEAD is already on origin/main. The workflow
+# checks the same thing before it builds or publishes.
 #
 # Prerequisites for tagging:
-#   - A clean working tree, on the commit you want to release (normally main).
+#   - A clean working tree.
+#   - HEAD is an ancestor of origin/main (including the tip of main).
 #   - Permission to push tags to fxricky/mywt.
 
 set -euo pipefail
@@ -44,8 +48,8 @@ build_release() {
   echo "==> Building macOS binaries into dist/ (${TAG})"
   local ldflags="-s -w -X github.com/fxricky/mywt/internal/version.version=${TAG}"
   mkdir -p dist
-  CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "${ldflags}" -o dist/mywt_darwin_arm64 .
-  CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "${ldflags}" -o dist/mywt_darwin_amd64 .
+  CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -buildvcs=false -ldflags "${ldflags}" -o dist/mywt_darwin_arm64 .
+  CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags "${ldflags}" -o dist/mywt_darwin_amd64 .
 
   echo "==> Generating checksums"
   (
@@ -73,9 +77,16 @@ if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
   exit 1
 fi
 
+echo "==> Checking HEAD is on origin/main"
+git fetch origin main
+if ! git merge-base --is-ancestor HEAD origin/main; then
+  echo "error: HEAD $(git rev-parse HEAD) is not on origin/main; refusing to tag ${TAG}" >&2
+  exit 1
+fi
+
 echo "==> Tagging ${TAG}"
 git tag "${TAG}"
 git push origin "${TAG}"
 echo "==> Pushed ${TAG}."
 echo "    GitHub Actions will test, build the macOS binaries, and publish the release."
-echo "    Install with: curl -fsSL https://raw.githubusercontent.com/fxricky/mywt/main/scripts/install.sh | bash"
+echo "    Install with: curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/fxricky/mywt/main/scripts/install.sh | bash"
