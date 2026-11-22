@@ -62,8 +62,18 @@ jobs:
             echo "Release ${tag} already exists. Uploading artifacts; title and notes stay as they are."
             gh release upload "$tag" "${assets[@]}" --clobber
           else
+            # Semver prerelease (v1.0.0-rc.1, including +build) must not become
+            # /releases/latest. scripts/install.sh installs that latest tag.
+            # Build metadata alone (v1.0.0+build) stays a normal release.
+            create_args=(--title "$tag" --generate-notes)
+            version="${tag#v}"
+            version="${version%%+*}"
+            if [[ "$version" == *-* ]]; then
+              echo "Marking ${tag} as a prerelease so it does not become the latest release."
+              create_args+=(--prerelease)
+            fi
             echo "Creating release ${tag}."
-            if ! gh release create "$tag" "${assets[@]}" --title "$tag" --generate-notes; then
+            if ! gh release create "$tag" "${assets[@]}" "${create_args[@]}"; then
               echo "Release ${tag} appeared while this job was publishing. Uploading artifacts instead."
               gh release upload "$tag" "${assets[@]}" --clobber
             fi

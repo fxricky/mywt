@@ -102,11 +102,17 @@ git push origin v1.0.0
 version is semver and the working tree is clean. It does not build the
 binaries or create the GitHub release.
 
-Pushing `vMAJOR.MINOR.PATCH` (optional pre-release, such as `v1.0.0-rc.1`)
-runs GitHub Actions (`.github/workflows/release.yml`). The workflow tests,
-cross-compiles the macOS arm64 and amd64 binaries, writes
-`mywt_checksums.txt`, and publishes them. A tag that is not semver fails the
-job before anything is published.
+Pushing `vMAJOR.MINOR.PATCH` runs GitHub Actions
+(`.github/workflows/release.yml`). The workflow tests, cross-compiles the
+macOS arm64 and amd64 binaries, writes `mywt_checksums.txt`, and publishes
+them. A tag that is not semver fails the job before anything is published.
+
+A pre-release tag such as `v1.0.0-rc.1` is published as a GitHub prerelease.
+`scripts/install.sh` installs `/releases/latest`, which ignores prereleases,
+so a release candidate does not replace the stable install. A stable tag,
+including one with build metadata such as `v1.0.0+build`, stays a normal
+release. If the release already exists, the workflow only uploads artifacts
+and does not change whether it is a prerelease.
 
 Two ways to do the same thing from the GitHub website:
 
