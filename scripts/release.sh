@@ -1,47 +1,81 @@
 #!/usr/bin/env bash
-# Release mywt: build macOS binaries (arm64 + amd64), tag the repo, push the
-# tag, and create a GitHub Release with the binaries and a checksums file.
+# Release mywt.
+#
+# Pushing a vMAJOR.MINOR.PATCH tag is what publishes a release. GitHub Actions
+# (.github/workflows/release.yml) builds the macOS binaries and creates or
+# updates the GitHub release. This script does not create the release, so a
+# local tag push and Actions do not publish twice.
 #
 # Usage:
-#   scripts/release.sh <version>          # e.g. scripts/release.sh 0.1.0
+#   scripts/release.sh <version>                 # tag v<version> and push it
+#   scripts/release.sh --build-only <version>    # write dist/ only
 #
-# Prerequisites:
-#   - A clean working tree on the main branch of the mywt repo.
-#   - Go installed locally.
-#   - `gh` (GitHub CLI) authenticated with push/release rights to fxricky/mywt.
+# <version> is 1.0.0 or v1.0.0. The leading v is optional here.
+#
+# --build-only is what Actions runs after the tag push. It uses the same
+# ldflags, binary names, and checksum file as a local build, and it does not
+# create a tag or a release. CGO is disabled so the same command cross-compiles
+# on the Ubuntu runner; mywt has no cgo code.
+#
+# Prerequisites for tagging:
+#   - A clean working tree, on the commit you want to release (normally main).
+#   - Permission to push tags to fxricky/mywt.
 
 set -euo pipefail
 
-VERSION="${1:?usage: release.sh <version> (e.g. 0.1.0)}"
-VERSION="${VERSION#v}"   # strip a leading 'v' if the caller passed one
+BUILD_ONLY=0
+if [ "${1:-}" = "--build-only" ]; then
+  BUILD_ONLY=1
+  shift
+fi
+
+RAW="${1:?usage: release.sh [--build-only] <version> (e.g. 1.0.0 or v1.0.0)}"
+VERSION="${RAW#v}"
 TAG="v${VERSION}"
 
-if ! command -v gh >/dev/null 2>&1; then
-  echo "error: 'gh' (GitHub CLI) is required to create the release" >&2
+# Semver: MAJOR.MINOR.PATCH, optional pre-release and build metadata.
+# v0.0.0-test is valid. v1.2 and v1.0.0.1 are not.
+if ! printf '%s\n' "$TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+  echo "error: ${RAW} is not a valid semver tag (expected vMAJOR.MINOR.PATCH, optional -prerelease)" >&2
   exit 1
 fi
 
-echo "==> Building macOS binaries into dist/"
-LDFLAGS="-s -w -X github.com/fxricky/mywt/internal/version.version=${TAG}"
-mkdir -p dist
-GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "${LDFLAGS}" -o dist/mywt_darwin_arm64 .
-GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS}" -o dist/mywt_darwin_amd64 .
+build_release() {
+  echo "==> Building macOS binaries into dist/ (${TAG})"
+  local ldflags="-s -w -X github.com/fxricky/mywt/internal/version.version=${TAG}"
+  mkdir -p dist
+  CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "${ldflags}" -o dist/mywt_darwin_arm64 .
+  CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "${ldflags}" -o dist/mywt_darwin_amd64 .
 
-echo "==> Generating checksums"
-( cd dist && shasum -a 256 mywt_darwin_arm64 mywt_darwin_amd64 > mywt_checksums.txt )
-cat dist/mywt_checksums.txt
+  echo "==> Generating checksums"
+  (
+    cd dist
+    if command -v shasum >/dev/null 2>&1; then
+      shasum -a 256 mywt_darwin_arm64 mywt_darwin_amd64 > mywt_checksums.txt
+    else
+      sha256sum mywt_darwin_arm64 mywt_darwin_amd64 > mywt_checksums.txt
+    fi
+  )
+  cat dist/mywt_checksums.txt
+}
+
+if [ "$BUILD_ONLY" -eq 1 ]; then
+  build_release
+  exit 0
+fi
+
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "error: working tree is not clean; commit or stash before tagging ${TAG}" >&2
+  exit 1
+fi
+if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+  echo "error: tag ${TAG} already exists" >&2
+  exit 1
+fi
 
 echo "==> Tagging ${TAG}"
 git tag "${TAG}"
 git push origin "${TAG}"
-
-echo "==> Creating GitHub release ${TAG}"
-gh release create "${TAG}" \
-  dist/mywt_darwin_arm64 \
-  dist/mywt_darwin_amd64 \
-  dist/mywt_checksums.txt \
-  --title "${TAG}" \
-  --generate-notes
-
-echo "==> Done."
+echo "==> Pushed ${TAG}."
+echo "    GitHub Actions will test, build the macOS binaries, and publish the release."
 echo "    Install with: curl -fsSL https://raw.githubusercontent.com/fxricky/mywt/main/scripts/install.sh | bash"

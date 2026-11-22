@@ -86,6 +86,42 @@ By default each project gets a new branch named `wt-<session-timestamp>`
 (`20260730123456`), or the `--name` you set at create time. Ambiguous matches
 error.
 
+## Releasing
+
+Merging to `main` does not publish a release. After the commit you want is on
+`main`, tag it and push the tag:
+
+```sh
+git checkout main
+git pull
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+`scripts/release.sh 1.0.0` does that same tag and push after checking the
+version is semver and the working tree is clean. It does not build the
+binaries or create the GitHub release.
+
+Pushing `vMAJOR.MINOR.PATCH` (optional pre-release, such as `v1.0.0-rc.1`)
+runs GitHub Actions (`.github/workflows/release.yml`). The workflow tests,
+cross-compiles the macOS arm64 and amd64 binaries, writes
+`mywt_checksums.txt`, and publishes them. A tag that is not semver fails the
+job before anything is published.
+
+Two ways to do the same thing from the GitHub website:
+
+- **Tag only.** Create the tag in the GitHub UI. That is a tag push, so the
+  workflow runs and creates the release.
+- **Draft a new release.** On the Releases page, choose "Draft a new release",
+  enter a new tag, and publish. GitHub creates the tag and the release
+  together. The tag push starts one build. The release already exists, so the
+  workflow uploads the binaries and checksums onto it and does not change the
+  title or notes you wrote.
+
+`scripts/release.sh --build-only v1.0.0` only writes `dist/`. It does not tag,
+push, or publish. That is the command Actions runs, and it is safe to dry-run
+locally.
+
 ## License
 
 MIT

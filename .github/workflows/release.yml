@@ -1,0 +1,70 @@
+name: Release
+
+# A release build runs only when a version tag is pushed.
+#
+# (a) Creating a tag on the GitHub website, or `git push origin v1.0.0`, is a
+#     tag push. This workflow runs once.
+# (b) Releases → Draft a new release → choose a new tag → Publish creates the
+#     git tag and the GitHub release together. Creating that tag is still a
+#     tag push, which is the only event listened to here, so the build does
+#     not also run on release: published. The release may already exist when
+#     this job publishes; the publish step uploads artifacts onto it and leaves
+#     the title and notes alone.
+#
+# The concurrency group stops two runs for the same tag from uploading at once
+# (a re-run overlapping the original). It is not a second trigger.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: |
+          go test ./...
+          go vet ./...
+
+      - name: Build
+        run: scripts/release.sh --build-only "${GITHUB_REF_NAME}"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          assets=(
+            dist/mywt_darwin_arm64
+            dist/mywt_darwin_amd64
+            dist/mywt_checksums.txt
+          )
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release ${tag} already exists. Uploading artifacts; title and notes stay as they are."
+            gh release upload "$tag" "${assets[@]}" --clobber
+          else
+            echo "Creating release ${tag}."
+            if ! gh release create "$tag" "${assets[@]}" --title "$tag" --generate-notes; then
+              echo "Release ${tag} appeared while this job was publishing. Uploading artifacts instead."
+              gh release upload "$tag" "${assets[@]}" --clobber
+            fi
+          fi
