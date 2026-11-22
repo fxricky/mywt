@@ -252,41 +252,42 @@ share it.
 
 ## Releasing
 
-Merging to `main` does not publish a release. After the commit you want is on
-`main`, tag it and push the tag:
+Merging to `main` does not publish a release. Publish a GitHub release whose
+tag points at a commit on `main`. That is what starts the build.
+
+From the Releases page, draft a new release, choose a new tag on `main`, and
+publish it. Or, from a clean checkout of that commit:
 
 ```sh
-git checkout main
-git pull
-git tag v1.0.0
-git push origin v1.0.0
+scripts/release.sh 1.0.0
 ```
 
-`scripts/release.sh 1.0.0` does that same tag and push after checking the
-version is semver, the working tree is clean, and `HEAD` is already on
-`origin/main`. It does not build the binaries or create the GitHub release.
-A commit that is not on `main` is refused before a tag is created.
+`scripts/release.sh` checks that the version is semver and that `HEAD` is
+already on `origin/main`, pushes the tag, and publishes the release with
+`gh release create --verify-tag`. A semver pre-release tag such as
+`v1.0.0-rc.1` is marked as a prerelease. Mark the same checkbox on the
+Releases page when you create a release candidate there. `scripts/install.sh`
+installs `/releases/latest`, which ignores prereleases.
 
-Pushing `vMAJOR.MINOR.PATCH` runs GitHub Actions
-(`.github/workflows/release.yml`). The build job checks that the tagged
-commit is on `origin/main`, tests, and runs `scripts/build-release.sh`.
-That writes `dist/mywt_darwin_arm64`, `dist/mywt_darwin_amd64`, and
+Publishing the release runs GitHub Actions (`.github/workflows/release.yml`).
+The build job checks that the tag is semver and that its commit is on
+`origin/main`, tests, and runs `scripts/build-release.sh`. That writes
+`dist/mywt_darwin_arm64`, `dist/mywt_darwin_amd64`, and
 `dist/mywt_checksums.txt`, with the tag injected as `v<version>`. The
-publish job (environment `release`) attests those binaries, creates a draft
-with `gh release create --verify-tag --draft`, uploads the assets, checks
-the uploaded bytes against `mywt_checksums.txt`, and only then publishes
-with `gh release edit --draft=false`. A tag that is not semver, or a tag
-whose commit is not on `main`, fails before anything is published.
+publish job (environment `release`) attests those binaries and uploads them
+onto the release that already exists. It does not create or delete a
+release, and it does not change a prerelease flag, title, or notes. If one
+of the asset names is already on the release, the job fails instead of
+replacing it. A tag that is not semver, or whose commit is not on `main`,
+fails before any upload.
 
-A pre-release tag such as `v1.0.0-rc.1` is published as a GitHub prerelease.
-`scripts/install.sh` installs `/releases/latest`, which ignores prereleases,
-so a release candidate does not replace the stable install. A stable tag,
-including one with build metadata such as `v1.0.0+build`, stays a normal
-release.
+Pushing a tag without publishing a release does not run the workflow. The
+Releases page and `scripts/release.sh` both publish a release, so both go
+through that one event.
 
-If a GitHub release for the tag already exists, the publish job fails and
-does not change its title, notes, or assets. Create the tag only. Do not
-create the release in the GitHub UI first.
+The release is public before the binaries are attached. For a short time it
+can be the latest release and have no files. `scripts/install.sh` cannot
+download them until the workflow upload finishes.
 
 `scripts/build-release.sh v0.0.0-dev` writes `dist/` and does not tag, push,
 or publish. The checksum file lists `mywt_darwin_arm64` and
@@ -300,13 +301,13 @@ The workflow does not change repository administration. Set these yourself:
 - A ruleset for `v*` tags that blocks deleting or moving a tag and limits who
   can create one.
 - An environment named `release` with required reviewers. The publish job
-  uses `environment: release`, so a version tag waits for that approval
-  before it writes the GitHub release.
+  uses `environment: release`, so publishing a release waits for that
+  approval before it uploads the binaries.
 - Branch protection on `main`: require a pull request, and block force pushes
   and deletion. Releases are built only from commits already on `main`.
-- Immutable releases (Settings, General, Immutable releases). A published
-  release then keeps its tag and assets. The workflow creates its own draft,
-  uploads, checks the checksums, and only then publishes.
+- Leave immutable releases off (Settings, General). This flow publishes the
+  release first and uploads the binaries afterward. Immutable releases reject
+  that upload.
 
 ## License
 
