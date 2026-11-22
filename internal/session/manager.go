@@ -28,6 +28,16 @@ type CreateOptions struct {
 
 // Create makes a new empty timestamped session and returns it.
 func (m *Manager) Create(opts CreateOptions) (*Session, error) {
+	name := strings.TrimSpace(opts.Name)
+	if name != "" {
+		// Named sessions use this string as the default git branch. Reject
+		// illegal ref names here so we never store a name we would later have
+		// to rewrite. Existing sessions are not revisited.
+		if err := git.ValidateBranchName(name); err != nil {
+			return nil, fmt.Errorf("invalid session name %q: %w. Use a name that `git check-ref-format --branch` accepts, or omit --name and pass --branch when adding a repository", name, err)
+		}
+	}
+
 	if err := os.MkdirAll(m.Root, 0o755); err != nil {
 		return nil, fmt.Errorf("create worktree root: %w", err)
 	}
@@ -38,7 +48,7 @@ func (m *Manager) Create(opts CreateOptions) (*Session, error) {
 	}
 	s := &Session{
 		ID:        id,
-		Name:      strings.TrimSpace(opts.Name),
+		Name:      name,
 		CreatedAt: time.Now().UTC(),
 		Root:      m.Root,
 	}
@@ -68,36 +78,55 @@ func (m *Manager) uniqueID() (string, error) {
 	}
 }
 
+// defaultBranchPrefix is the historical prefix for unnamed sessions.
+const defaultBranchPrefix = "wt"
+
 // AddOptions controls Add.
 type AddOptions struct {
 	// Subfolder overrides the project subfolder name (default: basename of repo).
 	Subfolder string
-	// Branch overrides the new branch name. If empty, BranchPrefix+timestamp is used.
+	// Branch overrides the new branch name. When set, it wins over the session
+	// name and BranchPrefix.
 	Branch string
 	// BranchPrefix is prepended to the session timestamp to form the branch
-	// name when Branch is empty. Defaults to "wt".
+	// name for an unnamed session, or for a named session when the prefix is
+	// explicit. Defaults to "wt".
 	BranchPrefix string
+	// BranchPrefixSet reports that the caller explicitly chose BranchPrefix
+	// (for example, the CLI flag was present). An explicit prefix, including
+	// the default "wt", selects <prefix>-<timestamp> even when the session
+	// has a name.
+	BranchPrefixSet bool
 	// Base is the ref to start the new branch from. If empty, the repo's
 	// default branch is auto-detected.
 	Base string
 }
 
-// deriveBranchName returns the branch name for a new project. If branch is
-// non-empty it is returned as-is; otherwise a prefix + session-timestamp is
-// built. It is pure and does not touch git.
-func deriveBranchName(sessionID, branch, branchPrefix string) string {
-	b := strings.TrimSpace(branch)
-	if b != "" {
+// deriveBranchName chooses the branch to create. It does not talk to git;
+// callers validate the result. Precedence:
+//  1. An explicit branch name.
+//  2. The session name, when the session is named and the caller did not
+//     explicitly choose a prefix.
+//  3. <prefix>-<timestamp> (prefix defaults to "wt"). This is the historical
+//     name for unnamed sessions, and it is also used for a named session when
+//     the prefix is explicit.
+//
+// A prefix is explicit when prefixSet is true, or when prefix is neither empty
+// nor the default "wt" (so an API caller who passes BranchPrefix: "feat"
+// still gets the prefixed timestamp).
+func deriveBranchName(sessionID, sessionName, branch, branchPrefix string, prefixSet bool) string {
+	if b := strings.TrimSpace(branch); b != "" {
 		return b
 	}
 	prefix := strings.TrimSpace(branchPrefix)
+	explicitPrefix := prefixSet || (prefix != "" && prefix != defaultBranchPrefix)
+	if name := strings.TrimSpace(sessionName); name != "" && !explicitPrefix {
+		return name
+	}
 	if prefix == "" {
-		prefix = "wt"
+		prefix = defaultBranchPrefix
 	}
 	ts := strings.TrimPrefix(sessionID, IDPrefix)
-	if prefix == "" {
-		return ts
-	}
 	return prefix + "-" + ts
 }
 
@@ -130,7 +159,13 @@ func (m *Manager) Add(s *Session, opts AddOptions) (*Session, error) {
 		return nil, fmt.Errorf("project %q already exists in session %s (use --as to rename)", subfolder, s.ID)
 	}
 
-	branch := deriveBranchName(s.ID, opts.Branch, opts.BranchPrefix)
+	branch := deriveBranchName(s.ID, s.Name, opts.Branch, opts.BranchPrefix, opts.BranchPrefixSet)
+	if err := git.ValidateBranchName(branch); err != nil {
+		return nil, fmt.Errorf("invalid branch name %q: %w. Pass --branch <name> to choose a branch that `git check-ref-format --branch` accepts", branch, err)
+	}
+	if err := git.RefuseExistingBranch(repo, branch); err != nil {
+		return nil, err
+	}
 
 	base := strings.TrimSpace(opts.Base)
 	if base == "" {
