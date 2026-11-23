@@ -3,9 +3,9 @@
 # dist/mywt_darwin_arm64, dist/mywt_darwin_amd64, and dist/mywt_checksums.txt,
 # check those uploads, then publish the draft.
 #
-# The tag is created before this script runs. workflow_dispatch pushes it
-# with the workflow GITHUB_TOKEN. scripts/release.sh pushes it from a
-# checkout. This script does not create, move, or delete tags.
+# The tag is created before this script runs. The Release workflow pushes it
+# with the workflow GITHUB_TOKEN. This script does not create, move, or
+# delete tags.
 #
 # Fails if a release for the tag already exists, including a draft. It does
 # not edit or delete that release, and the upload does not pass --clobber.

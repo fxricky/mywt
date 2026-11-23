@@ -22,10 +22,10 @@ gofmt -w $(rg --files -g '*.go')  # format Go sources
 ```
 
 Run the local binary directly, for example `go run . list`. The release flow
-is macOS-specific. `scripts/release.sh 1.1.0` checks semver, requires `HEAD`
-on `origin/main`, and pushes the tag. GitHub Actions builds both macOS
-architectures, writes checksums, and publishes the release. The same
-workflow can be started from the Actions tab with a version.
+is macOS-specific. `scripts/release.sh 1.1.0` checks semver and starts the
+Release workflow on `main`. It does not tag or push. GitHub Actions creates
+the tag, builds both macOS architectures, writes checksums, and publishes
+the release. The same workflow can be started from the Actions tab.
 
 ## Coding Style & Naming Conventions
 

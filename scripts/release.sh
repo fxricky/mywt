@@ -1,26 +1,22 @@
 #!/usr/bin/env bash
-# Tag a commit that is already on origin/main and push the tag.
+# Start the Release workflow on main.
 #
-# Pushing vX.Y.Z starts GitHub Actions (.github/workflows/release.yml).
-# That workflow builds the macOS binaries and publishes the GitHub release.
-# This script does not call gh and does not create or edit a release.
+# GitHub Actions creates the tag, builds the macOS binaries, and publishes
+# the release. This script checks semver and dispatches that workflow. It
+# does not create a tag, push a ref, or create a release.
 #
-# Run workflow from the Actions tab is the other way to start that same
-# workflow. It creates the tag itself. Use one of the two, not both, for a
-# given version.
+# From the Actions tab, Release, then Run workflow, does the same thing.
 #
 # Usage:
-#   scripts/release.sh <version>    # tag v<version> and push it
+#   scripts/release.sh <version>    # start Release for v<version> on main
 #
-# <version> is 1.0.0 or v1.0.0. The leading v is optional here.
+# <version> is 1.1.0 or v1.1.0. The leading v is optional here.
 #
 # A local build, with no tag and no GitHub release, is:
 #   scripts/build-release.sh v0.0.0-dev
 #
 # Prerequisites:
-#   - A clean working tree.
-#   - HEAD is an ancestor of origin/main (including the tip of main).
-#   - Permission to push the tag.
+#   - gh, authenticated to fxricky/mywt, with permission to dispatch workflows.
 
 set -euo pipefail
 
@@ -35,24 +31,14 @@ if ! printf '%s\n' "$TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-
   exit 1
 fi
 
-if ! git diff --quiet || ! git diff --cached --quiet; then
-  echo "error: working tree is not clean; commit or stash before tagging ${TAG}" >&2
-  exit 1
-fi
-if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
-  echo "error: tag ${TAG} already exists" >&2
+if ! command -v gh >/dev/null 2>&1; then
+  echo "error: gh is required to start the Release workflow" >&2
   exit 1
 fi
 
-echo "==> Checking HEAD is on origin/main"
-git fetch origin main
-if ! git merge-base --is-ancestor HEAD origin/main; then
-  echo "error: HEAD $(git rev-parse HEAD) is not on origin/main; refusing to tag ${TAG}" >&2
-  exit 1
-fi
+cd "$(dirname "$0")/.."
 
-echo "==> Tagging ${TAG}"
-git tag "${TAG}"
-git push origin "${TAG}"
-echo "    GitHub Actions will test, build the macOS binaries, and publish the release."
+echo "==> Starting the Release workflow for ${TAG} on main"
+gh workflow run release.yml --ref main -f "version=${TAG}"
+echo "    The release environment must be approved before Actions tags, builds, and publishes."
 echo "    Install with: curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/fxricky/mywt/main/scripts/install.sh | bash"
